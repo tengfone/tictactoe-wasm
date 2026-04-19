@@ -1,6 +1,14 @@
-# Tic Tac Toe in WASM (Rust)
+# Tic Tac Toe in WASM + WebGL (Rust)
 
-A small Tic Tac Toe game with game logic in Rust compiled to WebAssembly.
+A Tic Tac Toe demo where game rules run in Rust/WebAssembly and the board is rendered in WebGL using Three.js.
+
+## Notes on scope
+
+This is a polished demo-style implementation, not a true "AAA" production game pipeline. It focuses on:
+
+- Rust + WASM gameplay logic
+- interactive 3D board and pieces
+- smooth piece spawn animation and dynamic lighting
 
 ## Prerequisites
 
