@@ -39,14 +39,18 @@ class FallbackGame {
     return this.board[index];
   }
 
+  is_cell_playable(index) {
+    return (
+      index >= 0 &&
+      index < this.board.length &&
+      this.gameWinner === Cell.Empty &&
+      !this.draw &&
+      this.board[index] === Cell.Empty
+    );
+  }
+
   play(index) {
-    if (
-      index < 0 ||
-      index >= this.board.length ||
-      this.gameWinner !== Cell.Empty ||
-      this.draw ||
-      this.board[index] !== Cell.Empty
-    ) {
+    if (!this.is_cell_playable(index)) {
       return false;
     }
 
@@ -81,21 +85,163 @@ class FallbackGame {
   }
 }
 
+class FallbackUltimateGame {
+  constructor() {
+    this.reset();
+  }
+
+  reset() {
+    this.cells = Array(81).fill(Cell.Empty);
+    this.boardWinners = Array(9).fill(Cell.Empty);
+    this.current = Cell.X;
+    this.gameWinner = Cell.Empty;
+    this.activeBoard = -1;
+    this.draw = false;
+  }
+
+  current_player() {
+    return this.current;
+  }
+
+  winner() {
+    return this.gameWinner;
+  }
+
+  is_draw() {
+    return this.draw;
+  }
+
+  active_board() {
+    return this.activeBoard;
+  }
+
+  get_cell(index) {
+    return this.cells[index];
+  }
+
+  get_board_winner(index) {
+    return this.boardWinners[index];
+  }
+
+  is_board_full(index) {
+    if (index < 0 || index >= 9) {
+      return false;
+    }
+
+    const start = index * 9;
+    return this.cells.slice(start, start + 9).every((cell) => cell !== Cell.Empty);
+  }
+
+  is_board_playable(index) {
+    return (
+      index >= 0 &&
+      index < 9 &&
+      this.boardWinners[index] === Cell.Empty &&
+      !this.is_board_full(index)
+    );
+  }
+
+  is_cell_playable(index) {
+    if (
+      index < 0 ||
+      index >= this.cells.length ||
+      this.gameWinner !== Cell.Empty ||
+      this.draw ||
+      this.cells[index] !== Cell.Empty
+    ) {
+      return false;
+    }
+
+    const boardIndex = Math.floor(index / 9);
+    if (!this.is_board_playable(boardIndex)) {
+      return false;
+    }
+
+    return this.activeBoard < 0 || this.activeBoard === boardIndex;
+  }
+
+  play(index) {
+    if (!this.is_cell_playable(index)) {
+      return false;
+    }
+
+    const boardIndex = Math.floor(index / 9);
+    const localIndex = index % 9;
+
+    this.cells[index] = this.current;
+
+    const smallWinner = this.calculateSmallBoardWinner(boardIndex);
+    if (smallWinner !== Cell.Empty) {
+      this.boardWinners[boardIndex] = smallWinner;
+    }
+
+    const largeWinner = this.calculateLargeBoardWinner();
+    if (largeWinner !== Cell.Empty) {
+      this.gameWinner = largeWinner;
+      return true;
+    }
+
+    if (!this.boardWinners.some((_, i) => this.is_board_playable(i))) {
+      this.draw = true;
+      return true;
+    }
+
+    this.activeBoard = this.is_board_playable(localIndex) ? localIndex : -1;
+    this.current = this.current === Cell.X ? Cell.O : Cell.X;
+    return true;
+  }
+
+  calculateSmallBoardWinner(boardIndex) {
+    const start = boardIndex * 9;
+    for (const [a, b, c] of WIN_LINES) {
+      const aVal = this.cells[start + a];
+      if (
+        aVal !== Cell.Empty &&
+        aVal === this.cells[start + b] &&
+        aVal === this.cells[start + c]
+      ) {
+        return aVal;
+      }
+    }
+
+    return Cell.Empty;
+  }
+
+  calculateLargeBoardWinner() {
+    for (const [a, b, c] of WIN_LINES) {
+      const aVal = this.boardWinners[a];
+      if (
+        aVal !== Cell.Empty &&
+        aVal === this.boardWinners[b] &&
+        aVal === this.boardWinners[c]
+      ) {
+        return aVal;
+      }
+    }
+
+    return Cell.Empty;
+  }
+}
+
 let Game = FallbackGame;
+let UltimateGame = FallbackUltimateGame;
 
 async function loadGameRuntime() {
   try {
     const wasm = await import("./pkg/tic_tac_toe_wasm.js");
     await wasm.default();
     Game = wasm.Game;
+    UltimateGame = wasm.UltimateGame || FallbackUltimateGame;
   } catch (error) {
     console.warn("WASM package unavailable; using JS game runtime fallback.", error);
     Game = FallbackGame;
+    UltimateGame = FallbackUltimateGame;
   }
 }
 
 const statusEl = document.getElementById("status");
-const modeToggle = document.getElementById("mode-toggle");
+const opponentButtons = Array.from(document.querySelectorAll("[data-opponent-mode]"));
+const variantButtons = Array.from(document.querySelectorAll("[data-game-variant]"));
 const modeChip = document.getElementById("mode");
 const scoreEl = document.getElementById("score");
 const resetButton = document.getElementById("reset");
@@ -116,13 +262,37 @@ const SETTINGS_TEMPLATE = {
   aiDifficulty: "easy",
   quality: "balanced",
 };
+const GAME_MODES = Object.freeze({
+  ClassicAi: "classic-ai",
+  ClassicHuman: "classic-human",
+  UltimateAi: "ultimate-ai",
+  UltimateHuman: "ultimate-human",
+});
+const GAME_MODE_SEQUENCE = [
+  GAME_MODES.ClassicAi,
+  GAME_MODES.ClassicHuman,
+  GAME_MODES.UltimateAi,
+  GAME_MODES.UltimateHuman,
+];
+const GAME_VARIANTS = Object.freeze({
+  Classic: "classic",
+  Ultimate: "ultimate",
+});
+const OPPONENT_MODES = Object.freeze({
+  Computer: "computer",
+  Human: "human",
+});
 const SCORE_TEMPLATE = {
   vsComputer: { you: 0, ai: 0, draw: 0 },
   vsHuman: { x: 0, o: 0, draw: 0 },
+  ultimateVsComputer: { you: 0, ai: 0, draw: 0 },
+  ultimateVsHuman: { x: 0, o: 0, draw: 0 },
 };
 const baseScoreTemplate = () => ({
   vsComputer: { ...SCORE_TEMPLATE.vsComputer },
   vsHuman: { ...SCORE_TEMPLATE.vsHuman },
+  ultimateVsComputer: { ...SCORE_TEMPLATE.ultimateVsComputer },
+  ultimateVsHuman: { ...SCORE_TEMPLATE.ultimateVsHuman },
 });
 
 const QUALITY_MODES = ["performance", "balanced", "cinematic"];
@@ -245,17 +415,22 @@ let raycaster;
 let pointer;
 let cells = [];
 let pieces = [];
+let boardClaimMarkers = [];
+let boardFrameMaterials = [];
 let confettiBursts = [];
 let boardGroup;
+let boardContentGroup;
 let pbrMaterialX;
 let pbrMaterialO;
 let baseCellMaterial;
+let inlayMaterial;
 let audioCtx;
 let cameraTarget = cameraAnchors.intro.clone();
 let hoveredCell = null;
 let ghostPiece = null;
 let winBeam = null;
 let winBeamProgress = 0;
+let currentGameMode = GAME_MODES.ClassicAi;
 let vsComputer = true;
 let aiThinking = false;
 let aiMoveToken = 0;
@@ -280,23 +455,86 @@ let replayIndex = 0;
 let isReplaying = false;
 let statusPulseTimer = null;
 
+function isUltimateMode(mode = currentGameMode) {
+  return mode === GAME_MODES.UltimateAi || mode === GAME_MODES.UltimateHuman;
+}
+
+function createGameForCurrentMode() {
+  return isUltimateMode() ? new UltimateGame() : new Game();
+}
+
+function getCurrentVariant() {
+  return isUltimateMode() ? GAME_VARIANTS.Ultimate : GAME_VARIANTS.Classic;
+}
+
+function getCurrentOpponentMode() {
+  return vsComputer ? OPPONENT_MODES.Computer : OPPONENT_MODES.Human;
+}
+
+function modeFromParts(variant, opponentMode) {
+  if (variant === GAME_VARIANTS.Ultimate) {
+    return opponentMode === OPPONENT_MODES.Computer
+      ? GAME_MODES.UltimateAi
+      : GAME_MODES.UltimateHuman;
+  }
+
+  return opponentMode === OPPONENT_MODES.Computer
+    ? GAME_MODES.ClassicAi
+    : GAME_MODES.ClassicHuman;
+}
+
+function getCellCount() {
+  return isUltimateMode() ? 81 : 9;
+}
+
+function syncModeFlags() {
+  vsComputer = currentGameMode === GAME_MODES.ClassicAi || currentGameMode === GAME_MODES.UltimateAi;
+}
+
+function setGameMode(nextMode) {
+  if (!GAME_MODE_SEQUENCE.includes(nextMode)) {
+    return;
+  }
+
+  currentGameMode = nextMode;
+  syncModeFlags();
+  humanPlayerCell = Cell.X;
+  aiPlayerCell = Cell.O;
+  game = createGameForCurrentMode();
+}
+
 function refreshModeChip() {
   if (!modeChip) {
     return;
   }
 
+  const boardLabel = isUltimateMode() ? "Ultimate" : "Normal";
   if (vsComputer) {
-    modeChip.textContent = `Mode: ${AI_DIFFICULTY_LABELS[aiDifficulty]} AI (${humanPlayerCell === Cell.X ? "You are X" : "You are O"})`;
+    modeChip.textContent = `Mode: ${boardLabel} ${AI_DIFFICULTY_LABELS[aiDifficulty]} AI`;
     return;
   }
 
-  modeChip.textContent = "Mode: Human vs Human";
+  modeChip.textContent = `Mode: ${boardLabel} 1v1`;
 }
 
 function formatCellReference(index) {
+  if (isUltimateMode()) {
+    const boardIndex = Math.floor(index / 9);
+    const localIndex = index % 9;
+    const localRow = Math.floor(localIndex / 3) + 1;
+    const localCol = (localIndex % 3) + 1;
+    return `${formatBoardReference(boardIndex)}, Cell R${localRow}C${localCol}`;
+  }
+
   const row = Math.floor(index / 3);
   const col = index % 3;
   return `R${row + 1}C${col + 1}`;
+}
+
+function formatBoardReference(boardIndex) {
+  const boardRow = Math.floor(boardIndex / 3) + 1;
+  const boardCol = (boardIndex % 3) + 1;
+  return `Board R${boardRow}C${boardCol}`;
 }
 
 function appendMoveHistory(index, playerCell, playerAlias) {
@@ -338,7 +576,7 @@ function resetMoveLog() {
 function parseReplayMove(entry) {
   const playerCell = entry?.playerCell;
   const index = Number(entry?.index);
-  if (!Number.isInteger(index)) {
+  if (!Number.isInteger(index) || index < 0 || index >= 81) {
     return null;
   }
 
@@ -360,6 +598,7 @@ function saveLastMatch() {
   }
 
   const payload = {
+    gameMode: currentGameMode,
     vsComputer,
     moves: moveHistory.map((entry) => ({
       index: entry.index,
@@ -413,9 +652,24 @@ function loadLastMatch() {
       return null;
     }
 
+    const replayMode = GAME_MODE_SEQUENCE.includes(parsed.gameMode)
+      ? parsed.gameMode
+      : parsed.gameMode === "ultimate"
+        ? parsed.vsComputer === true
+          ? GAME_MODES.UltimateAi
+          : GAME_MODES.UltimateHuman
+      : normalizedMoves.some((move) => move.index >= 9)
+        ? parsed.vsComputer === true
+          ? GAME_MODES.UltimateAi
+          : GAME_MODES.UltimateHuman
+        : parsed.vsComputer === false
+          ? GAME_MODES.ClassicHuman
+          : GAME_MODES.ClassicAi;
+
     return {
       moves: normalizedMoves,
       winner: parsed.winner === Cell.X || parsed.winner === Cell.O ? parsed.winner : Cell.Empty,
+      gameMode: replayMode,
       vsComputer: parsed.vsComputer === true,
       humanPlayerCell: parsed.humanPlayerCell === Cell.X || parsed.humanPlayerCell === Cell.O ? parsed.humanPlayerCell : Cell.X,
       aiPlayerCell: parsed.aiPlayerCell === Cell.X || parsed.aiPlayerCell === Cell.O ? parsed.aiPlayerCell : Cell.O,
@@ -449,20 +703,21 @@ function startReplay() {
   isReplaying = true;
   replayedMoves = match.moves;
   replayIndex = 0;
-  replayedMoves = replayedMoves.slice(0, 9);
   moveHistory = [];
   updateMoveLog([]);
 
   aiThinking = false;
   aiMoveToken += 1;
-  game.reset();
-  vsComputer = match.vsComputer;
+  setGameMode(match.gameMode);
+  replayedMoves = replayedMoves.slice(0, getCellCount());
   humanPlayerCell = match.humanPlayerCell || Cell.X;
   aiPlayerCell = match.aiPlayerCell || Cell.O;
   aiDifficulty = match.aiDifficulty || "smart";
-  resetScenePieces();
+  rebuildBoardLayout();
   renderBoardState();
   refreshModeChip();
+  refreshModeButton();
+  refreshScoreChip();
   refreshDifficultyButton();
   refreshQualityButton();
   refreshReplayButton();
@@ -502,11 +757,25 @@ function startReplay() {
 }
 
 function refreshModeButton() {
-  if (!modeToggle) {
-    return;
+  for (const button of opponentButtons) {
+    const isActive = button.dataset.opponentMode === getCurrentOpponentMode();
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
   }
 
-  modeToggle.textContent = vsComputer ? "Play 1v1" : "Play vs Computer";
+  for (const button of variantButtons) {
+    const isActive = button.dataset.gameVariant === getCurrentVariant();
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  }
+}
+
+function currentScoreSection() {
+  if (isUltimateMode()) {
+    return vsComputer ? scoreState.ultimateVsComputer : scoreState.ultimateVsHuman;
+  }
+
+  return vsComputer ? scoreState.vsComputer : scoreState.vsHuman;
 }
 
 function refreshScoreChip() {
@@ -514,12 +783,14 @@ function refreshScoreChip() {
     return;
   }
 
+  const boardLabel = isUltimateMode() ? "Ultimate" : "Normal";
+  const section = currentScoreSection();
   if (vsComputer) {
-    scoreEl.textContent = `You ${scoreState.vsComputer.you} · AI ${scoreState.vsComputer.ai} · Draw ${scoreState.vsComputer.draw}`;
+    scoreEl.textContent = `${boardLabel} · You ${section.you} · AI ${section.ai} · Draw ${section.draw}`;
     return;
   }
 
-  scoreEl.textContent = `X ${scoreState.vsHuman.x} · O ${scoreState.vsHuman.o} · Draw ${scoreState.vsHuman.draw}`;
+  scoreEl.textContent = `${boardLabel} · X ${section.x} · O ${section.o} · Draw ${section.draw}`;
 }
 
 function readSavedScore() {
@@ -550,6 +821,8 @@ function readSavedScore() {
     return {
       vsComputer: normalizeSection(parsed.vsComputer, ["you", "ai", "draw"]),
       vsHuman: normalizeSection(parsed.vsHuman, ["x", "o", "draw"]),
+      ultimateVsComputer: normalizeSection(parsed.ultimateVsComputer, ["you", "ai", "draw"]),
+      ultimateVsHuman: normalizeSection(parsed.ultimateVsHuman || parsed.ultimate, ["x", "o", "draw"]),
     };
   } catch (error) {
     console.error("Unable to parse score state:", error);
@@ -647,6 +920,12 @@ function refreshDifficultyButton() {
     return;
   }
 
+  difficultyToggle.disabled = !vsComputer;
+  if (!vsComputer) {
+    difficultyToggle.textContent = "AI: Off";
+    return;
+  }
+
   difficultyToggle.textContent = `AI: ${AI_DIFFICULTY_LABELS[aiDifficulty]}`;
 }
 
@@ -728,6 +1007,11 @@ function cycleQualityMode() {
 }
 
 function cycleDifficultyMode() {
+  if (!vsComputer) {
+    refreshDifficultyButton();
+    return;
+  }
+
   const currentIndex = DIFFICULTY_MODES.indexOf(aiDifficulty);
   const nextIndex = (currentIndex + 1) % DIFFICULTY_MODES.length;
   aiDifficulty = DIFFICULTY_MODES[nextIndex];
@@ -829,7 +1113,7 @@ function updateStatus() {
 
   if (game.winner() !== Cell.Empty) {
     const winnerText = labels[game.winner()];
-    const winnerLabel = vsComputer
+    const winnerLabel = !isUltimateMode() && vsComputer
       ? winnerText === labels[humanPlayerCell]
         ? "You"
         : "Computer"
@@ -851,6 +1135,24 @@ function updateStatus() {
     return;
   }
 
+  if (isUltimateMode()) {
+    const activeBoard = typeof game.active_board === "function" ? game.active_board() : -1;
+    const current = vsComputer
+      ? game.current_player() === humanPlayerCell
+        ? "You"
+        : "Computer"
+      : labels[game.current_player()];
+    const target = activeBoard >= 0
+      ? ` · play ${formatBoardReference(activeBoard)}`
+      : " · play any open board";
+    statusEl.textContent = `Turn: ${current}${target}`;
+    statusEl.classList.add("status--pulse");
+    statusPulseTimer = window.setTimeout(() => {
+      statusEl.classList.remove("status--pulse");
+    }, 140);
+    return;
+  }
+
   const current = game.current_player() === humanPlayerCell ? "You" : "Computer";
   const turn = vsComputer ? `Turn: ${current}` : `Turn: ${labels[game.current_player()]}`;
   statusEl.textContent = turn;
@@ -867,17 +1169,18 @@ function recordScore() {
 
   if (game.winner() !== Cell.Empty && !scene.userData.scoreRecorded) {
     const winner = game.winner();
+    const section = currentScoreSection();
     if (vsComputer) {
       if (winner === humanPlayerCell) {
-        scoreState.vsComputer.you += 1;
+        section.you += 1;
       } else if (winner === aiPlayerCell) {
-        scoreState.vsComputer.ai += 1;
+        section.ai += 1;
       }
     } else {
       if (winner === Cell.X) {
-        scoreState.vsHuman.x += 1;
+        section.x += 1;
       } else if (winner === Cell.O) {
-        scoreState.vsHuman.o += 1;
+        section.o += 1;
       }
     }
 
@@ -888,11 +1191,7 @@ function recordScore() {
   }
 
   if (game.is_draw() && !scene.userData.drawRecorded) {
-    if (vsComputer) {
-      scoreState.vsComputer.draw += 1;
-    } else {
-      scoreState.vsHuman.draw += 1;
-    }
+    currentScoreSection().draw += 1;
 
     saveScoreState();
     refreshScoreChip();
@@ -977,14 +1276,16 @@ function oTokenShape() {
   return shape;
 }
 
-function buildCellGeometry() {
+function buildCellGeometry(size = 2.08) {
+  const radius = Math.min(0.18, size * 0.18);
+  const depth = size > 1 ? 0.18 : 0.08;
   const mesh = new THREE.Mesh(
-    horizontalExtrudeGeometry(roundedRectangleShape(2.08, 2.08, 0.18), {
-      depth: 0.18,
-      bevelSize: 0.045,
-      bevelThickness: 0.035,
-      bevelSegments: 8,
-      curveSegments: 32,
+    horizontalExtrudeGeometry(roundedRectangleShape(size, size, radius), {
+      depth,
+      bevelSize: size > 1 ? 0.045 : 0.018,
+      bevelThickness: size > 1 ? 0.035 : 0.014,
+      bevelSegments: size > 1 ? 8 : 5,
+      curveSegments: size > 1 ? 32 : 18,
     }),
     baseCellMaterial.clone()
   );
@@ -992,7 +1293,7 @@ function buildCellGeometry() {
   mesh.receiveShadow = true;
 
   const hoverRing = new THREE.Mesh(
-    new THREE.RingGeometry(0.82, 1.06, 48),
+    new THREE.RingGeometry(size * 0.39, size * 0.51, size > 1 ? 48 : 24),
     new THREE.MeshStandardMaterial({
       color: 0xf4f1e8,
       transparent: true,
@@ -1004,7 +1305,7 @@ function buildCellGeometry() {
     })
   );
   hoverRing.rotation.x = -Math.PI / 2;
-  hoverRing.position.y = 0.16;
+  hoverRing.position.y = size > 1 ? 0.16 : 0.08;
   hoverRing.renderOrder = 2;
 
   mesh.add(hoverRing);
@@ -1081,20 +1382,66 @@ function buildGhostPiece() {
   return { group, x, o };
 }
 
-function boardToWorld(i) {
+function classicCellToWorld(i) {
   const row = Math.floor(i / 3);
   const col = i % 3;
   return new THREE.Vector3((col - 1) * 2.32, 0, (row - 1) * 2.32);
 }
 
+function ultimateBoardToWorld(boardIndex) {
+  const row = Math.floor(boardIndex / 3);
+  const col = boardIndex % 3;
+  return new THREE.Vector3((col - 1) * 2.32, 0, (row - 1) * 2.32);
+}
+
+function ultimateCellToWorld(index) {
+  const boardIndex = Math.floor(index / 9);
+  const localIndex = index % 9;
+  const boardCenter = ultimateBoardToWorld(boardIndex);
+  const row = Math.floor(localIndex / 3);
+  const col = localIndex % 3;
+
+  return new THREE.Vector3(
+    boardCenter.x + (col - 1) * 0.58,
+    0,
+    boardCenter.z + (row - 1) * 0.58
+  );
+}
+
+function boardToWorld(i) {
+  return isUltimateMode() ? ultimateCellToWorld(i) : classicCellToWorld(i);
+}
+
 function calculateWinningLine() {
+  if (isUltimateMode() && typeof game.get_board_winner === "function") {
+    for (const [a, b, c] of WIN_LINES) {
+      const va = game.get_board_winner(a);
+      const vb = game.get_board_winner(b);
+      const vc = game.get_board_winner(c);
+
+      if (va !== Cell.Empty && va === vb && vb === vc) {
+        return {
+          start: ultimateBoardToWorld(a),
+          end: ultimateBoardToWorld(c),
+          winner: va,
+        };
+      }
+    }
+
+    return null;
+  }
+
   for (const [a, b, c] of WIN_LINES) {
     const va = game.get_cell(a);
     const vb = game.get_cell(b);
     const vc = game.get_cell(c);
 
     if (va !== Cell.Empty && va === vb && vb === vc) {
-      return [a, c, va];
+      return {
+        start: classicCellToWorld(a),
+        end: classicCellToWorld(c),
+        winner: va,
+      };
     }
   }
 
@@ -1128,6 +1475,66 @@ function boardMoves(board) {
     }
   }
   return moves;
+}
+
+const POSITION_WEIGHTS = [3, 2, 3, 2, 5, 2, 3, 2, 3];
+
+function getUltimateValidMoves() {
+  const moves = [];
+  for (let i = 0; i < 81; i++) {
+    if (typeof game.is_cell_playable === "function" ? game.is_cell_playable(i) : game.get_cell(i) === Cell.Empty) {
+      moves.push(i);
+    }
+  }
+  return moves;
+}
+
+function getUltimateCells() {
+  const cellsSnapshot = [];
+  for (let i = 0; i < 81; i++) {
+    cellsSnapshot.push(game.get_cell(i));
+  }
+  return cellsSnapshot;
+}
+
+function getUltimateBoardWinners() {
+  const winners = [];
+  for (let i = 0; i < 9; i++) {
+    winners.push(typeof game.get_board_winner === "function" ? game.get_board_winner(i) : Cell.Empty);
+  }
+  return winners;
+}
+
+function smallBoardFromCells(cellsSnapshot, boardIndex) {
+  const start = boardIndex * 9;
+  return cellsSnapshot.slice(start, start + 9);
+}
+
+function boardWouldWin(board, localIndex, player) {
+  if (board[localIndex] !== Cell.Empty) {
+    return false;
+  }
+
+  const trial = board.slice();
+  trial[localIndex] = player;
+  return boardWinner(trial) === player;
+}
+
+function boardPlayableFromState(cellsSnapshot, boardWinners, boardIndex) {
+  if (boardIndex < 0 || boardIndex >= 9 || boardWinners[boardIndex] !== Cell.Empty) {
+    return false;
+  }
+
+  return smallBoardFromCells(cellsSnapshot, boardIndex).some((cell) => cell === Cell.Empty);
+}
+
+function hasImmediateSmallBoardWin(cellsSnapshot, boardWinners, boardIndex, player) {
+  if (!boardPlayableFromState(cellsSnapshot, boardWinners, boardIndex)) {
+    return false;
+  }
+
+  const board = smallBoardFromCells(cellsSnapshot, boardIndex);
+  return board.some((cell, localIndex) => cell === Cell.Empty && boardWouldWin(board, localIndex, player));
 }
 
 function evaluateBoard(board, depth) {
@@ -1172,6 +1579,10 @@ function chooseBalancedMove() {
 }
 
 function chooseAIMove() {
+  if (isUltimateMode()) {
+    return chooseUltimateAIMove();
+  }
+
   if (aiDifficulty === "easy") {
     return chooseEasyMove();
   }
@@ -1181,6 +1592,95 @@ function chooseAIMove() {
   }
 
   return chooseBalancedMove();
+}
+
+function chooseUltimateEasyMove() {
+  const moves = getUltimateValidMoves();
+  if (moves.length === 0) {
+    return -1;
+  }
+
+  return moves[Math.floor(Math.random() * moves.length)];
+}
+
+function scoreUltimateMove(move) {
+  const cellsSnapshot = getUltimateCells();
+  const boardWinners = getUltimateBoardWinners();
+  const boardIndex = Math.floor(move / 9);
+  const localIndex = move % 9;
+  const smallBoard = smallBoardFromCells(cellsSnapshot, boardIndex);
+  let score = POSITION_WEIGHTS[localIndex] + POSITION_WEIGHTS[boardIndex] * 1.2;
+
+  if (boardWouldWin(smallBoard, localIndex, humanPlayerCell)) {
+    score += 90;
+  }
+
+  const boardWinnersIfHumanClaimed = boardWinners.slice();
+  boardWinnersIfHumanClaimed[boardIndex] = humanPlayerCell;
+  if (boardWinner(boardWinnersIfHumanClaimed) === humanPlayerCell) {
+    score += 180;
+  }
+
+  const simulatedCells = cellsSnapshot.slice();
+  const simulatedBoardWinners = boardWinners.slice();
+  simulatedCells[move] = aiPlayerCell;
+
+  const simulatedSmallBoard = smallBoardFromCells(simulatedCells, boardIndex);
+  const claimedBoard = boardWinner(simulatedSmallBoard);
+  if (claimedBoard === aiPlayerCell) {
+    simulatedBoardWinners[boardIndex] = aiPlayerCell;
+    score += 150;
+
+    if (boardWinner(simulatedBoardWinners) === aiPlayerCell) {
+      return 100000;
+    }
+  }
+
+  const nextBoard = localIndex;
+  if (boardPlayableFromState(simulatedCells, simulatedBoardWinners, nextBoard)) {
+    if (hasImmediateSmallBoardWin(simulatedCells, simulatedBoardWinners, nextBoard, humanPlayerCell)) {
+      score -= 120;
+    }
+
+    if (POSITION_WEIGHTS[nextBoard] >= 3) {
+      score -= POSITION_WEIGHTS[nextBoard] * 1.5;
+    }
+  } else {
+    score -= 24;
+  }
+
+  return score + Math.random() * 0.01;
+}
+
+function chooseUltimateSmartMove() {
+  const moves = getUltimateValidMoves();
+  if (moves.length === 0) {
+    return -1;
+  }
+
+  let bestMove = moves[0];
+  let bestScore = -Infinity;
+  for (const move of moves) {
+    const score = scoreUltimateMove(move);
+    if (score > bestScore) {
+      bestScore = score;
+      bestMove = move;
+    }
+  }
+
+  return bestMove;
+}
+
+function chooseUltimateAIMove() {
+  if (aiDifficulty === "easy") {
+    return chooseUltimateEasyMove();
+  }
+
+  if (aiDifficulty === "smart" && Math.random() < 0.28) {
+    return chooseUltimateEasyMove();
+  }
+
+  return chooseUltimateSmartMove();
 }
 
 function minimax(board, depth, player) {
@@ -1291,9 +1791,7 @@ function showWinBeam(line) {
     return;
   }
 
-  const [startCell, endCell, winner] = line;
-  const start = boardToWorld(startCell);
-  const end = boardToWorld(endCell);
+  const { start, end } = line;
   const midpoint = start.clone().add(end).multiplyScalar(0.5);
 
   const direction = end.clone().sub(start);
@@ -1316,7 +1814,7 @@ function showWinBeam(line) {
   winBeam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), flatDirection);
   winBeam.scale.set(1, 1, 0.001);
   winBeam.renderOrder = 2;
-  scene.add(winBeam);
+  boardContentGroup.add(winBeam);
   winBeamProgress = 0;
 }
 
@@ -1371,9 +1869,12 @@ function addPiece(index, cell) {
   }
 
   const pos = boardToWorld(index);
-  piece.position.set(pos.x, 0.28, pos.z);
+  const targetScale = isUltimateMode() ? 0.28 : 1;
+  piece.position.set(pos.x, isUltimateMode() ? 0.16 : 0.28, pos.z);
   piece.scale.setScalar(0.001);
-  boardGroup.add(piece);
+  piece.userData.targetScale = targetScale;
+  piece.userData.baseY = piece.position.y;
+  boardContentGroup.add(piece);
   piece.rotation.set(0, 0, 0);
   piece.userData.player = cell;
   pieces.push({ piece, bornAt: performance.now() });
@@ -1396,13 +1897,25 @@ function setCameraMood() {
   cameraTarget.copy(game.current_player() === Cell.X ? cameraAnchors.xTurn : cameraAnchors.oTurn);
 }
 
+function canPlayIndex(index) {
+  if (!game || game.winner() !== Cell.Empty || game.is_draw()) {
+    return false;
+  }
+
+  if (typeof game.is_cell_playable === "function") {
+    return game.is_cell_playable(index);
+  }
+
+  return index >= 0 && index < getCellCount() && game.get_cell(index) === Cell.Empty;
+}
+
 function updateGhost() {
   if (!ghostPiece) {
     return;
   }
 
   const gameFinished = game.winner() !== Cell.Empty || game.is_draw();
-  if (gameFinished || !hoveredCell || hoveredCell.userData.value !== Cell.Empty) {
+  if (gameFinished || !hoveredCell || !canPlayIndex(hoveredCell.userData.index)) {
     ghostPiece.group.visible = false;
     return;
   }
@@ -1410,19 +1923,21 @@ function updateGhost() {
   ghostPiece.group.visible = true;
   ghostPiece.x.visible = game.current_player() === Cell.X;
   ghostPiece.o.visible = game.current_player() === Cell.O;
-  ghostPiece.group.position.copy(hoveredCell.position).add(new THREE.Vector3(0, 0.28, 0));
+  ghostPiece.group.position
+    .copy(hoveredCell.position)
+    .add(new THREE.Vector3(0, isUltimateMode() ? 0.14 : 0.28, 0));
   const pulse = 0.94 + 0.05 * (1 - Math.abs(Math.sin(performance.now() * 0.008)));
-  ghostPiece.group.scale.set(pulse, pulse, pulse);
+  const targetScale = isUltimateMode() ? 0.28 : 1;
+  ghostPiece.group.scale.setScalar(pulse * targetScale);
 }
 
 function updateHoverVisuals() {
   for (const cell of cells) {
-    const value = cell.userData.value;
-    const playable = game.winner() === Cell.Empty && !game.is_draw() && value === Cell.Empty;
+    const playable = canPlayIndex(cell.userData.index);
     const hoverRing = cell.userData.hoverRing;
 
     if (!playable) {
-      cell.material.color.setHex(0x11110f);
+      cell.material.color.setHex(isUltimateMode() ? 0x0f0f0d : 0x11110f);
       if (hoverRing) {
         hoverRing.material.opacity = 0;
         hoverRing.scale.setScalar(1);
@@ -1433,8 +1948,8 @@ function updateHoverVisuals() {
     }
 
     const isHovered = hoveredCell === cell;
-    cell.material.color.setHex(isHovered ? 0x24231f : 0x181815);
-    cell.position.y = THREE.MathUtils.lerp(cell.position.y, isHovered ? 0.08 : 0, 0.18);
+    cell.material.color.setHex(isHovered ? 0x24231f : isUltimateMode() ? 0x171712 : 0x181815);
+    cell.position.y = THREE.MathUtils.lerp(cell.position.y, isHovered ? (isUltimateMode() ? 0.045 : 0.08) : 0, 0.18);
     if (hoverRing) {
       hoverRing.material.opacity = isHovered ? 0.72 : 0;
       hoverRing.scale.setScalar(isHovered ? 1.08 : 0.92);
@@ -1443,8 +1958,35 @@ function updateHoverVisuals() {
   }
 }
 
-function renderBoardState() {
+function updateUltimateBoardState() {
+  if (!isUltimateMode()) {
+    return;
+  }
+
+  const activeBoard = typeof game.active_board === "function" ? game.active_board() : -1;
   for (let i = 0; i < 9; i++) {
+    const winner = typeof game.get_board_winner === "function" ? game.get_board_winner(i) : Cell.Empty;
+    const marker = boardClaimMarkers[i];
+    if (marker) {
+      marker.x.visible = winner === Cell.X;
+      marker.o.visible = winner === Cell.O;
+    }
+
+    const frameMaterial = boardFrameMaterials[i];
+    if (!frameMaterial) {
+      continue;
+    }
+
+    const playable = typeof game.is_board_playable === "function" ? game.is_board_playable(i) : true;
+    const isActive = activeBoard < 0 ? playable : activeBoard === i && playable;
+    frameMaterial.opacity = isActive ? 0.82 : playable ? 0.22 : 0.08;
+    frameMaterial.color.setHex(isActive ? 0xf4f1e8 : 0xb99a55);
+    frameMaterial.emissive.setHex(isActive ? 0x4a3c1c : 0x171209);
+  }
+}
+
+function renderBoardState() {
+  for (let i = 0; i < getCellCount(); i++) {
     const existing = cells[i].userData.value;
     const value = game.get_cell(i);
     if (existing === Cell.Empty && value !== Cell.Empty) {
@@ -1453,6 +1995,8 @@ function renderBoardState() {
 
     cells[i].userData.value = value;
   }
+
+  updateUltimateBoardState();
 
   const winner = game.winner();
   if (winner !== Cell.Empty && !scene.userData.winnerCelebrated) {
@@ -1477,7 +2021,9 @@ function renderBoardState() {
 
 function resetScenePieces() {
   for (const { piece } of pieces) {
-    boardGroup.remove(piece);
+    if (piece.parent) {
+      piece.parent.remove(piece);
+    }
   }
   pieces = [];
 
@@ -1489,7 +2035,9 @@ function resetScenePieces() {
   confettiBursts = [];
 
   if (winBeam) {
-    scene.remove(winBeam);
+    if (winBeam.parent) {
+      winBeam.parent.remove(winBeam);
+    }
     winBeam.geometry.dispose();
     winBeam.material.dispose();
     winBeam = null;
@@ -1498,7 +2046,7 @@ function resetScenePieces() {
 
   hoveredCell = null;
 
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < cells.length; i++) {
     cells[i].userData.value = Cell.Empty;
     cells[i].position.y = 0;
   }
@@ -1615,10 +2163,12 @@ function animate(now) {
   for (const entry of pieces) {
     const t = Math.min(1, (now - entry.bornAt) / 240);
     const eased = 1 - Math.pow(1 - t, 3);
-    entry.piece.scale.setScalar(eased);
+    const targetScale = entry.piece.userData.targetScale || 1;
+    const baseY = entry.piece.userData.baseY ?? 0.28;
+    entry.piece.scale.setScalar(eased * targetScale);
 
     const settle = Math.sin(t * Math.PI);
-    entry.piece.position.y = 0.28 + 0.06 * (1 - t) * settle;
+    entry.piece.position.y = baseY + 0.06 * targetScale * (1 - t) * settle;
   }
 
   updateConfetti(delta);
@@ -1667,6 +2217,202 @@ function onResize() {
 
   renderer.setSize(width, height, false);
   composer.setSize(width, height);
+}
+
+function disposeObject(object) {
+  object.traverse((child) => {
+    if (child.geometry) {
+      child.geometry.dispose();
+    }
+
+    if (Array.isArray(child.material)) {
+      for (const material of child.material) {
+        material.dispose();
+      }
+    } else if (child.material) {
+      child.material.dispose();
+    }
+  });
+}
+
+function clearBoardLayout() {
+  resetScenePieces();
+
+  if (!boardContentGroup) {
+    return;
+  }
+
+  for (const child of [...boardContentGroup.children]) {
+    boardContentGroup.remove(child);
+    disposeObject(child);
+  }
+
+  cells = [];
+  boardClaimMarkers = [];
+  boardFrameMaterials = [];
+  ghostPiece = null;
+}
+
+function addLineMesh(geometry, material, position) {
+  const line = new THREE.Mesh(geometry, material.clone());
+  line.position.copy(position);
+  line.castShadow = true;
+  boardContentGroup.add(line);
+  return line;
+}
+
+function buildClassicBoardLayout() {
+  for (const offset of [-1.16, 1.16]) {
+    addLineMesh(
+      new THREE.BoxGeometry(0.045, 0.045, 6.82),
+      inlayMaterial,
+      new THREE.Vector3(offset, 0.12, 0)
+    );
+
+    addLineMesh(
+      new THREE.BoxGeometry(6.82, 0.045, 0.045),
+      inlayMaterial,
+      new THREE.Vector3(0, 0.12, offset)
+    );
+  }
+
+  for (let i = 0; i < 9; i++) {
+    const cell = buildCellGeometry();
+    const pos = boardToWorld(i);
+    cell.position.set(pos.x, 0, pos.z);
+    cell.userData.index = i;
+    cell.userData.value = Cell.Empty;
+    boardContentGroup.add(cell);
+    cells.push(cell);
+  }
+}
+
+function buildUltimateClaimMarker(boardIndex) {
+  const xMaterial = pbrMaterialX.clone();
+  xMaterial.transparent = true;
+  xMaterial.opacity = 0.28;
+  xMaterial.depthWrite = false;
+  xMaterial.emissive.setHex(0x24211b);
+  xMaterial.emissiveIntensity = 0.16;
+
+  const oMaterial = pbrMaterialO.clone();
+  oMaterial.transparent = true;
+  oMaterial.opacity = 0.3;
+  oMaterial.depthWrite = false;
+  oMaterial.emissive.setHex(0x30230f);
+  oMaterial.emissiveIntensity = 0.18;
+
+  const center = ultimateBoardToWorld(boardIndex);
+  const group = new THREE.Group();
+  group.position.set(center.x, 0.38, center.z);
+
+  const x = buildXPiece(xMaterial);
+  const o = buildOPiece(oMaterial);
+  x.scale.setScalar(0.92);
+  o.scale.setScalar(0.92);
+  x.visible = false;
+  o.visible = false;
+
+  group.add(x, o);
+  boardContentGroup.add(group);
+  boardClaimMarkers[boardIndex] = { group, x, o };
+}
+
+function buildUltimateBoardFrame(boardIndex) {
+  const center = ultimateBoardToWorld(boardIndex);
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xb99a55,
+    emissive: 0x171209,
+    emissiveIntensity: 0.35,
+    transparent: true,
+    opacity: 0.24,
+    metalness: 0.3,
+    roughness: 0.42,
+  });
+  const frame = new THREE.Group();
+  const width = 1.72;
+  const half = width / 2;
+  const thickness = 0.035;
+
+  const top = new THREE.Mesh(new THREE.BoxGeometry(width, 0.04, thickness), material);
+  top.position.set(0, 0.14, -half);
+  const bottom = top.clone();
+  bottom.position.z = half;
+
+  const left = new THREE.Mesh(new THREE.BoxGeometry(thickness, 0.04, width), material);
+  left.position.set(-half, 0.14, 0);
+  const right = left.clone();
+  right.position.x = half;
+
+  frame.add(top, bottom, left, right);
+  frame.position.set(center.x, 0, center.z);
+  boardContentGroup.add(frame);
+  boardFrameMaterials[boardIndex] = material;
+}
+
+function buildUltimateBoardLayout() {
+  for (const offset of [-1.16, 1.16]) {
+    addLineMesh(
+      new THREE.BoxGeometry(0.07, 0.06, 6.96),
+      inlayMaterial,
+      new THREE.Vector3(offset, 0.13, 0)
+    );
+
+    addLineMesh(
+      new THREE.BoxGeometry(6.96, 0.06, 0.07),
+      inlayMaterial,
+      new THREE.Vector3(0, 0.13, offset)
+    );
+  }
+
+  const miniLineMaterial = inlayMaterial.clone();
+  miniLineMaterial.transparent = true;
+  miniLineMaterial.opacity = 0.44;
+
+  for (let boardIndex = 0; boardIndex < 9; boardIndex++) {
+    const center = ultimateBoardToWorld(boardIndex);
+    buildUltimateBoardFrame(boardIndex);
+    buildUltimateClaimMarker(boardIndex);
+
+    for (const offset of [-0.29, 0.29]) {
+      addLineMesh(
+        new THREE.BoxGeometry(0.018, 0.028, 1.56),
+        miniLineMaterial,
+        new THREE.Vector3(center.x + offset, 0.105, center.z)
+      );
+
+      addLineMesh(
+        new THREE.BoxGeometry(1.56, 0.028, 0.018),
+        miniLineMaterial,
+        new THREE.Vector3(center.x, 0.105, center.z + offset)
+      );
+    }
+  }
+
+  for (let i = 0; i < 81; i++) {
+    const cell = buildCellGeometry(0.46);
+    const pos = boardToWorld(i);
+    cell.position.set(pos.x, 0, pos.z);
+    cell.userData.index = i;
+    cell.userData.boardIndex = Math.floor(i / 9);
+    cell.userData.value = Cell.Empty;
+    boardContentGroup.add(cell);
+    cells.push(cell);
+  }
+}
+
+function rebuildBoardLayout() {
+  clearBoardLayout();
+
+  if (isUltimateMode()) {
+    buildUltimateBoardLayout();
+  } else {
+    buildClassicBoardLayout();
+  }
+
+  ghostPiece = buildGhostPiece();
+  boardContentGroup.add(ghostPiece.group);
+  updateUltimateBoardState();
 }
 
 function setup3D() {
@@ -1814,6 +2560,7 @@ function setup3D() {
 
   boardGroup = new THREE.Group();
   scene.add(boardGroup);
+  boardContentGroup = new THREE.Group();
 
   const boardBaseMaterial = new THREE.MeshPhysicalMaterial({
     color: 0x070706,
@@ -1837,8 +2584,9 @@ function setup3D() {
   boardBase.receiveShadow = true;
   boardBase.castShadow = true;
   boardGroup.add(boardBase);
+  boardGroup.add(boardContentGroup);
 
-  const inlayMaterial = new THREE.MeshPhysicalMaterial({
+  inlayMaterial = new THREE.MeshPhysicalMaterial({
     color: 0xb99a55,
     metalness: 0.58,
     roughness: 0.24,
@@ -1846,30 +2594,8 @@ function setup3D() {
     clearcoatRoughness: 0.18,
     envMapIntensity: 1.25,
   });
-  for (const offset of [-1.16, 1.16]) {
-    const vertical = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.045, 6.82), inlayMaterial);
-    vertical.position.set(offset, 0.12, 0);
-    vertical.castShadow = true;
-    boardGroup.add(vertical);
 
-    const horizontal = new THREE.Mesh(new THREE.BoxGeometry(6.82, 0.045, 0.045), inlayMaterial);
-    horizontal.position.set(0, 0.12, offset);
-    horizontal.castShadow = true;
-    boardGroup.add(horizontal);
-  }
-
-  for (let i = 0; i < 9; i++) {
-    const cell = buildCellGeometry();
-    const pos = boardToWorld(i);
-    cell.position.set(pos.x, 0, pos.z);
-    cell.userData.index = i;
-    cell.userData.value = Cell.Empty;
-    boardGroup.add(cell);
-    cells.push(cell);
-  }
-
-  ghostPiece = buildGhostPiece();
-  boardGroup.add(ghostPiece.group);
+  rebuildBoardLayout();
 
   renderer.domElement.addEventListener("pointerdown", onPointerDown);
   renderer.domElement.addEventListener("pointerup", onClick);
@@ -1884,35 +2610,45 @@ function setup3D() {
   requestAnimationFrame(animate);
 }
 
-if (modeToggle) {
-  modeToggle.addEventListener("click", () => {
-    if (isReplaying) {
-      stopReplay();
-    }
-
-    vsComputer = !vsComputer;
-    aiMoveToken += 1;
-    aiThinking = false;
-    game.reset();
-    resetScenePieces();
-    resetMoveLog();
-    cameraTarget.copy(cameraAnchors.neutral);
-
-    if (vsComputer) {
-      assignVsComputerRoles();
-    } else {
-      humanPlayerCell = Cell.X;
-      aiPlayerCell = Cell.O;
-    }
-
-    refreshModeChip();
+function switchGameMode(nextMode) {
+  if (!GAME_MODE_SEQUENCE.includes(nextMode) || nextMode === currentGameMode) {
     refreshModeButton();
-    refreshScoreChip();
-    renderBoardState();
+    return;
+  }
 
-    if (vsComputer && game.current_player() === aiPlayerCell && !game.winner() && !game.is_draw()) {
-      playComputerTurn();
-    }
+  if (isReplaying) {
+    stopReplay();
+  }
+
+  aiMoveToken += 1;
+  aiThinking = false;
+  setGameMode(nextMode);
+  rebuildBoardLayout();
+  resetMoveLog();
+  cameraTarget.copy(cameraAnchors.neutral);
+
+  refreshModeChip();
+  refreshModeButton();
+  refreshScoreChip();
+  refreshDifficultyButton();
+  renderBoardState();
+
+  if (vsComputer && game.current_player() === aiPlayerCell && !game.winner() && !game.is_draw()) {
+    playComputerTurn();
+  }
+}
+
+for (const opponentButton of opponentButtons) {
+  opponentButton.addEventListener("click", () => {
+    const nextMode = modeFromParts(getCurrentVariant(), opponentButton.dataset.opponentMode);
+    switchGameMode(nextMode);
+  });
+}
+
+for (const variantButton of variantButtons) {
+  variantButton.addEventListener("click", () => {
+    const nextMode = modeFromParts(variantButton.dataset.gameVariant, getCurrentOpponentMode());
+    switchGameMode(nextMode);
   });
 }
 
@@ -1961,7 +2697,7 @@ if (resetScoreButton) {
 
 async function run() {
   await loadGameRuntime();
-  game = new Game();
+  setGameMode(currentGameMode);
   setup3D();
 
   const settings = readSavedSettings();

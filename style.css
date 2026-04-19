@@ -174,10 +174,16 @@ h1 + p,
   right: clamp(14px, 2vw, 26px);
   bottom: clamp(18px, 2vw, 28px);
   display: flex;
+  align-items: center;
   gap: 7px;
   padding: 7px;
   border-radius: 999px;
   pointer-events: auto;
+}
+
+.mode-options {
+  display: flex;
+  gap: 7px;
 }
 
 .settings-panel {
@@ -214,7 +220,7 @@ h1 + p,
   gap: 7px;
 }
 
-#mode-toggle,
+.mode-option,
 #reset,
 #quality-toggle,
 #difficulty-toggle,
@@ -235,9 +241,15 @@ h1 + p,
   transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
 
-#mode-toggle,
+.mode-option,
 #reset {
-  min-width: 118px;
+  min-width: 74px;
+}
+
+.mode-option.is-active {
+  border-color: var(--line-strong);
+  background: rgba(244, 241, 232, 0.16);
+  color: var(--accent);
 }
 
 #difficulty-toggle,
@@ -245,7 +257,7 @@ h1 + p,
   color: var(--accent);
 }
 
-#mode-toggle:hover,
+.mode-option:hover,
 #reset:hover,
 #quality-toggle:hover,
 #difficulty-toggle:hover,
@@ -258,7 +270,7 @@ h1 + p,
   background: rgba(244, 241, 232, 0.1);
 }
 
-#mode-toggle:active,
+.mode-option:active,
 #reset:active,
 #quality-toggle:active,
 #difficulty-toggle:active,
@@ -266,6 +278,12 @@ h1 + p,
 #replay-button:active,
 #reset-score:active {
   transform: translateY(1px);
+}
+
+#difficulty-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  transform: none;
 }
 
 .status--pulse {
@@ -314,33 +332,42 @@ h1 + p,
 
   .play-card {
     left: 10px;
-    bottom: 10px;
-    width: min(210px, calc(50vw - 14px));
+    right: 10px;
+    bottom: 182px;
+    width: auto;
   }
 
   .quick-actions {
+    left: 10px;
     right: 10px;
     bottom: 10px;
-    max-width: calc(50vw - 14px);
-    overflow-x: auto;
-    scrollbar-width: none;
+    display: grid;
+    grid-template-columns: 1fr;
+    max-width: none;
+    overflow: visible;
   }
 
-  .quick-actions::-webkit-scrollbar {
-    display: none;
+  .mode-options {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
   }
 
   .settings-panel {
     right: 10px;
-    bottom: 62px;
+    bottom: 236px;
   }
 
   .button-row {
     width: min(220px, calc(100vw - 20px));
   }
 
-  #mode-toggle,
+  .mode-option,
   #reset {
-    min-width: 102px;
+    min-width: 0;
+    height: 42px;
+    padding: 0 8px;
+    white-space: normal;
+    line-height: 1.08;
   }
 }
