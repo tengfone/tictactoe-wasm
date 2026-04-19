@@ -185,13 +185,15 @@ const labels = {
   [Cell.O]: "O",
 };
 
+const ORTHOGRAPHIC_VIEW_SIZE = 8.6;
+
 const cameraAnchors = {
-  intro: new THREE.Vector3(0, 8.6, 10.4),
-  neutral: new THREE.Vector3(0, 6.35, 7.25),
-  xTurn: new THREE.Vector3(-1.2, 6.25, 7.0),
-  oTurn: new THREE.Vector3(1.2, 6.25, 7.0),
-  win: new THREE.Vector3(0, 5.35, 6.05),
-  draw: new THREE.Vector3(0, 7.6, 8.2),
+  intro: new THREE.Vector3(0, 8.6, 6.1),
+  neutral: new THREE.Vector3(0, 7.2, 5.15),
+  xTurn: new THREE.Vector3(-0.45, 7.25, 5.05),
+  oTurn: new THREE.Vector3(0.45, 7.25, 5.05),
+  win: new THREE.Vector3(0, 6.55, 4.6),
+  draw: new THREE.Vector3(0, 7.6, 5.4),
 };
 
 const WIN_LINES = [
@@ -904,8 +906,88 @@ function maybeSaveMatchState() {
   }
 }
 
+function roundedRectangleShape(width, height, radius) {
+  const x = -width / 2;
+  const y = -height / 2;
+  const shape = new THREE.Shape();
+
+  shape.moveTo(x + radius, y);
+  shape.lineTo(x + width - radius, y);
+  shape.quadraticCurveTo(x + width, y, x + width, y + radius);
+  shape.lineTo(x + width, y + height - radius);
+  shape.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  shape.lineTo(x + radius, y + height);
+  shape.quadraticCurveTo(x, y + height, x, y + height - radius);
+  shape.lineTo(x, y + radius);
+  shape.quadraticCurveTo(x, y, x + radius, y);
+
+  return shape;
+}
+
+function horizontalExtrudeGeometry(shape, options = {}) {
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: options.depth ?? 0.16,
+    bevelEnabled: options.bevelEnabled ?? true,
+    bevelSize: options.bevelSize ?? 0.035,
+    bevelThickness: options.bevelThickness ?? 0.03,
+    bevelSegments: options.bevelSegments ?? 8,
+    curveSegments: options.curveSegments ?? 64,
+  });
+
+  geometry.center();
+  geometry.rotateX(-Math.PI / 2);
+  return geometry;
+}
+
+function xTokenShape() {
+  const s = 0.76;
+  const w = 0.24;
+  const shape = new THREE.Shape();
+  const points = [
+    [-s, -s + w],
+    [-s + w, -s],
+    [0, -w],
+    [s - w, -s],
+    [s, -s + w],
+    [w, 0],
+    [s, s - w],
+    [s - w, s],
+    [0, w],
+    [-s + w, s],
+    [-s, s - w],
+    [-w, 0],
+  ];
+
+  shape.moveTo(points[0][0], points[0][1]);
+  for (const [x, y] of points.slice(1)) {
+    shape.lineTo(x, y);
+  }
+  shape.closePath();
+  return shape;
+}
+
+function oTokenShape() {
+  const shape = new THREE.Shape();
+  shape.absellipse(0, 0, 0.72, 0.72, 0, Math.PI * 2, false, 0);
+
+  const hole = new THREE.Path();
+  hole.absellipse(0, 0, 0.42, 0.42, 0, Math.PI * 2, true, 0);
+  shape.holes.push(hole);
+
+  return shape;
+}
+
 function buildCellGeometry() {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.22, 2.05), baseCellMaterial.clone());
+  const mesh = new THREE.Mesh(
+    horizontalExtrudeGeometry(roundedRectangleShape(2.08, 2.08, 0.18), {
+      depth: 0.18,
+      bevelSize: 0.045,
+      bevelThickness: 0.035,
+      bevelSegments: 8,
+      curveSegments: 32,
+    }),
+    baseCellMaterial.clone()
+  );
   mesh.castShadow = true;
   mesh.receiveShadow = true;
 
@@ -922,7 +1004,7 @@ function buildCellGeometry() {
     })
   );
   hoverRing.rotation.x = -Math.PI / 2;
-  hoverRing.position.y = 0.15;
+  hoverRing.position.y = 0.16;
   hoverRing.renderOrder = 2;
 
   mesh.add(hoverRing);
@@ -931,25 +1013,34 @@ function buildCellGeometry() {
 }
 
 function buildXPiece(material = pbrMaterialX) {
-  const group = new THREE.Group();
-
-  for (const angle of [Math.PI / 4, -Math.PI / 4]) {
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.24, 0.3), material);
-    bar.rotation.y = angle;
-    bar.castShadow = true;
-    group.add(bar);
-  }
-
-  group.rotation.y = Math.PI / 12;
-  return group;
+  const mesh = new THREE.Mesh(
+    horizontalExtrudeGeometry(xTokenShape(), {
+      depth: 0.18,
+      bevelSize: 0.028,
+      bevelThickness: 0.026,
+      bevelSegments: 8,
+      curveSegments: 16,
+    }),
+    material
+  );
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
 }
 
 function buildOPiece(material = pbrMaterialO) {
-  const mesh = new THREE.Mesh(new THREE.TorusGeometry(0.58, 0.15, 24, 64), material);
-  mesh.rotation.x = Math.PI / 2;
+  const mesh = new THREE.Mesh(
+    horizontalExtrudeGeometry(oTokenShape(), {
+      depth: 0.18,
+      bevelSize: 0.032,
+      bevelThickness: 0.028,
+      bevelSegments: 10,
+      curveSegments: 96,
+    }),
+    material
+  );
   mesh.castShadow = true;
-  mesh.scale.set(1.02, 1, 0.96);
-  mesh.userData.spin = true;
+  mesh.receiveShadow = true;
   return mesh;
 }
 
@@ -1208,19 +1299,19 @@ function showWinBeam(line) {
   const direction = end.clone().sub(start);
   const fullLength = direction.length();
   winBeam = new THREE.Mesh(
-    new THREE.BoxGeometry(0.16, 0.12, fullLength),
+    new THREE.BoxGeometry(0.08, 0.035, fullLength),
     new THREE.MeshStandardMaterial({
-      color: winner === Cell.X ? 0xf4f1e8 : 0xc8b37a,
-      emissive: winner === Cell.X ? 0x2a2924 : 0x3b3017,
-      emissiveIntensity: 0.14,
+      color: 0xd8bd72,
+      emissive: 0x3f3217,
+      emissiveIntensity: 0.18,
       transparent: true,
-      opacity: 0.95,
-      metalness: 0.08,
-      roughness: 0.72,
+      opacity: 0.86,
+      metalness: 0.48,
+      roughness: 0.28,
     })
   );
 
-  winBeam.position.set(midpoint.x, 0.46, midpoint.z);
+  winBeam.position.set(midpoint.x, 0.18, midpoint.z);
   const flatDirection = new THREE.Vector3(direction.x, 0, direction.z).normalize();
   winBeam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), flatDirection);
   winBeam.scale.set(1, 1, 0.001);
@@ -1280,17 +1371,10 @@ function addPiece(index, cell) {
   }
 
   const pos = boardToWorld(index);
-  piece.position.set(pos.x, cell === Cell.O ? 0.38 : 0.28, pos.z);
+  piece.position.set(pos.x, 0.28, pos.z);
   piece.scale.setScalar(0.001);
   boardGroup.add(piece);
-
-  if (cell === Cell.O) {
-    piece.rotation.x = Math.PI / 2;
-  } else {
-    piece.rotation.x = (Math.random() - 0.5) * 0.04;
-  }
-
-  piece.rotation.z = (Math.random() - 0.5) * 0.08;
+  piece.rotation.set(0, 0, 0);
   piece.userData.player = cell;
   pieces.push({ piece, bornAt: performance.now() });
 
@@ -1518,7 +1602,7 @@ function animateWinBeam() {
 
   winBeamProgress = Math.min(1, winBeamProgress + 0.045);
   winBeam.scale.z = THREE.MathUtils.lerp(0.001, 1, winBeamProgress);
-  winBeam.material.opacity = 0.2 + 0.75 * Math.sin(winBeamProgress * Math.PI);
+  winBeam.material.opacity = 0.18 + 0.68 * Math.sin(winBeamProgress * Math.PI);
 }
 
 let prevTime = performance.now();
@@ -1535,12 +1619,6 @@ function animate(now) {
 
     const settle = Math.sin(t * Math.PI);
     entry.piece.position.y = 0.28 + 0.06 * (1 - t) * settle;
-    entry.piece.rotation.y += 0.03 * (1 - t);
-    if (entry.piece.userData.spin) {
-      entry.piece.rotation.z += 0.02 * (1 - t);
-    } else {
-      entry.piece.rotation.x += 0.015 * (1 - t);
-    }
   }
 
   updateConfetti(delta);
@@ -1575,7 +1653,16 @@ function onResize() {
   const width = viewport.clientWidth;
   const height = Math.max(260, viewport.clientHeight);
 
-  camera.aspect = width / height;
+  if (camera.isOrthographicCamera) {
+    const aspect = width / height;
+    camera.left = (-ORTHOGRAPHIC_VIEW_SIZE * aspect) / 2;
+    camera.right = (ORTHOGRAPHIC_VIEW_SIZE * aspect) / 2;
+    camera.top = ORTHOGRAPHIC_VIEW_SIZE / 2;
+    camera.bottom = -ORTHOGRAPHIC_VIEW_SIZE / 2;
+  } else {
+    camera.aspect = width / height;
+  }
+
   camera.updateProjectionMatrix();
 
   renderer.setSize(width, height, false);
@@ -1588,7 +1675,7 @@ function setup3D() {
   scene.userData.winnerCelebrated = false;
   scene.userData.drawCelebrated = false;
 
-  camera = new THREE.PerspectiveCamera(44, 1, 0.1, 100);
+  camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
   camera.position.copy(cameraAnchors.intro);
   camera.lookAt(0, 0, 0);
 
@@ -1620,8 +1707,15 @@ function setup3D() {
   pointer = new THREE.Vector2();
 
   keyLight = new THREE.DirectionalLight(0xffffff, 2.3);
-  keyLight.position.set(7, 12, 8);
+  keyLight.position.set(5, 11, 6);
   keyLight.castShadow = true;
+  keyLight.shadow.camera.left = -7;
+  keyLight.shadow.camera.right = 7;
+  keyLight.shadow.camera.top = 7;
+  keyLight.shadow.camera.bottom = -7;
+  keyLight.shadow.camera.near = 1;
+  keyLight.shadow.camera.far = 26;
+  keyLight.shadow.bias = -0.00035;
   scene.add(keyLight);
 
   fillLight = new THREE.PointLight(0xf4f1e8, 0.5, 24, 1.6);
@@ -1679,30 +1773,30 @@ function setup3D() {
   starField.visible = false;
 
   baseCellMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x181815,
-    metalness: 0.02,
-    roughness: 0.82,
-    clearcoat: 0.18,
-    clearcoatRoughness: 0.45,
-    envMapIntensity: 0.55,
+    color: 0x11100d,
+    metalness: 0.18,
+    roughness: 0.66,
+    clearcoat: 0.55,
+    clearcoatRoughness: 0.36,
+    envMapIntensity: 0.9,
   });
 
   pbrMaterialX = new THREE.MeshPhysicalMaterial({
-    color: 0xf4f1e8,
-    metalness: 0.04,
-    roughness: 0.5,
-    clearcoat: 0.25,
-    clearcoatRoughness: 0.4,
-    envMapIntensity: 0.75,
+    color: 0xf7f3e8,
+    metalness: 0.12,
+    roughness: 0.34,
+    clearcoat: 0.72,
+    clearcoatRoughness: 0.22,
+    envMapIntensity: 1.1,
   });
 
   pbrMaterialO = new THREE.MeshPhysicalMaterial({
-    color: 0xc8b37a,
-    metalness: 0.04,
-    roughness: 0.54,
-    clearcoat: 0.22,
-    clearcoatRoughness: 0.42,
-    envMapIntensity: 0.72,
+    color: 0xd3ad58,
+    metalness: 0.36,
+    roughness: 0.3,
+    clearcoat: 0.66,
+    clearcoatRoughness: 0.2,
+    envMapIntensity: 1.2,
   });
 
   const floor = new THREE.Mesh(
@@ -1720,6 +1814,49 @@ function setup3D() {
 
   boardGroup = new THREE.Group();
   scene.add(boardGroup);
+
+  const boardBaseMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x070706,
+    metalness: 0.28,
+    roughness: 0.42,
+    clearcoat: 0.86,
+    clearcoatRoughness: 0.22,
+    envMapIntensity: 1.2,
+  });
+  const boardBase = new THREE.Mesh(
+    horizontalExtrudeGeometry(roundedRectangleShape(7.35, 7.35, 0.38), {
+      depth: 0.24,
+      bevelSize: 0.08,
+      bevelThickness: 0.055,
+      bevelSegments: 12,
+      curveSegments: 48,
+    }),
+    boardBaseMaterial
+  );
+  boardBase.position.y = -0.16;
+  boardBase.receiveShadow = true;
+  boardBase.castShadow = true;
+  boardGroup.add(boardBase);
+
+  const inlayMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0xb99a55,
+    metalness: 0.58,
+    roughness: 0.24,
+    clearcoat: 0.6,
+    clearcoatRoughness: 0.18,
+    envMapIntensity: 1.25,
+  });
+  for (const offset of [-1.16, 1.16]) {
+    const vertical = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.045, 6.82), inlayMaterial);
+    vertical.position.set(offset, 0.12, 0);
+    vertical.castShadow = true;
+    boardGroup.add(vertical);
+
+    const horizontal = new THREE.Mesh(new THREE.BoxGeometry(6.82, 0.045, 0.045), inlayMaterial);
+    horizontal.position.set(0, 0.12, offset);
+    horizontal.castShadow = true;
+    boardGroup.add(horizontal);
+  }
 
   for (let i = 0; i < 9; i++) {
     const cell = buildCellGeometry();
