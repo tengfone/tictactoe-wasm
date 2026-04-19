@@ -5,12 +5,14 @@ A fully client-side Tic Tac Toe demo where gameplay rules run in Rust/WebAssembl
 ## Feature set
 
 - Rust + WASM gameplay logic (win/draw validation in `src/lib.rs`)
+- Normal and Ultimate Tic Tac Toe variants with AI and 1v1 opponent modes
 - WebGL renderer with post-processing bloom + vignette
 - Cinematic camera transitions (intro + turn/win/draw framing)
 - PBR materials with environment lighting
 - Win/draw confetti particle celebrations
 - Animated neon win-beam highlighting the winning line
 - Hover tile lift/glow + ghost piece preview before placement
+- Ultimate mode highlights the forced mini-board and marks claimed boards
 - Sound effects + mobile haptic feedback
 
 ## Local development

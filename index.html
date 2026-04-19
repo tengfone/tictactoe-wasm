@@ -25,7 +25,7 @@
             <span class="brand-mark" aria-hidden="true"></span>
             <div>
               <h1>Tic Tac Toe</h1>
-              <p>Minimal board</p>
+              <p>Classic and ultimate</p>
             </div>
           </div>
           <div class="info-strip">
@@ -38,7 +38,14 @@
           <p id="move-log" class="move-log">Moves: none</p>
         </aside>
         <div class="quick-actions" aria-label="Primary game controls">
-          <button id="mode-toggle" type="button">Play 1v1</button>
+          <div class="mode-options" aria-label="Opponent">
+            <button class="mode-option" data-opponent-mode="computer" type="button">AI</button>
+            <button class="mode-option" data-opponent-mode="human" type="button">1v1</button>
+          </div>
+          <div class="mode-options" aria-label="Board">
+            <button class="mode-option" data-game-variant="classic" type="button">Normal</button>
+            <button class="mode-option" data-game-variant="ultimate" type="button">Ultimate</button>
+          </div>
           <button id="reset" type="button">Reset game</button>
         </div>
         <details class="settings-panel">
