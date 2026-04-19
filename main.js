@@ -25,8 +25,8 @@ const settingsKey = "ttt-wasm-settings-v1";
 const matchKey = "ttt-wasm-last-match-v1";
 const SETTINGS_TEMPLATE = {
   soundEnabled: true,
-  aiDifficulty: "smart",
-  quality: "cinematic",
+  aiDifficulty: "easy",
+  quality: "balanced",
 };
 const SCORE_TEMPLATE = {
   vsComputer: { you: 0, ai: 0, draw: 0 },
@@ -46,7 +46,7 @@ const AI_DIFFICULTY_LABELS = {
 };
 const DIFFICULTY_KEY_MAP = {
   easy: 0.22,
-  smart: 0.5,
+  smart: 0.35,
   master: 1,
 };
 const QUALITY_PRESETS = {
@@ -74,11 +74,11 @@ const QUALITY_PRESETS = {
   },
   cinematic: {
     label: "Cinematic",
-    maxPixelRatio: 2,
-    toneExposure: 1.09,
+    maxPixelRatio: 1.6,
+    toneExposure: 1.04,
     toneMapping: THREE.ACESFilmicToneMapping,
-    bloom: { strength: 0.76, radius: 0.66, threshold: 0.68 },
-    vignette: { offset: 0.96, darkness: 1.16 },
+    bloom: { strength: 0.54, radius: 0.56, threshold: 0.76 },
+    vignette: { offset: 0.98, darkness: 1.06 },
     shadows: true,
     lights: { key: 2.35, fill: 0.48, rim: 0.24, ambient: 0.58 },
     confettiScale: 1,
@@ -98,12 +98,12 @@ const labels = {
 };
 
 const cameraAnchors = {
-  intro: new THREE.Vector3(0, 11.2, 13.8),
-  neutral: new THREE.Vector3(0, 7.5, 9.25),
-  xTurn: new THREE.Vector3(-2.3, 7.7, 8.6),
-  oTurn: new THREE.Vector3(2.3, 7.7, 8.6),
-  win: new THREE.Vector3(0, 6.2, 6.5),
-  draw: new THREE.Vector3(0, 9.5, 11.2),
+  intro: new THREE.Vector3(0, 8.6, 10.4),
+  neutral: new THREE.Vector3(0, 6.35, 7.25),
+  xTurn: new THREE.Vector3(-1.2, 6.25, 7.0),
+  oTurn: new THREE.Vector3(1.2, 6.25, 7.0),
+  win: new THREE.Vector3(0, 5.35, 6.05),
+  draw: new THREE.Vector3(0, 7.6, 8.2),
 };
 
 const WIN_LINES = [
@@ -578,15 +578,15 @@ function refreshReplayButton() {
 
 function readSavedQuality() {
   if (!window.localStorage) {
-    return "cinematic";
+    return "balanced";
   }
 
   try {
     const raw = window.localStorage.getItem(qualityKey);
-    return QUALITY_PRESETS[raw] ? raw : "cinematic";
+    return QUALITY_PRESETS[raw] ? raw : "balanced";
   } catch (error) {
     console.warn("Unable to load quality mode:", error);
-    return "cinematic";
+    return "balanced";
   }
 }
 
@@ -652,10 +652,9 @@ function toggleSound() {
   saveSettings();
 }
 
-function assignRandomVsComputerRoles() {
-  const humanStarts = Math.random() < 0.5;
-  humanPlayerCell = humanStarts ? Cell.X : Cell.O;
-  aiPlayerCell = humanStarts ? Cell.O : Cell.X;
+function assignVsComputerRoles() {
+  humanPlayerCell = Cell.X;
+  aiPlayerCell = Cell.O;
 }
 
 function tryHaptic(pattern) {
@@ -818,17 +817,17 @@ function maybeSaveMatchState() {
 }
 
 function buildCellGeometry() {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.2, 1.8), baseCellMaterial.clone());
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.22, 2.05), baseCellMaterial.clone());
   mesh.castShadow = true;
   mesh.receiveShadow = true;
 
   const hoverRing = new THREE.Mesh(
-    new THREE.RingGeometry(0.72, 0.94, 42),
+    new THREE.RingGeometry(0.82, 1.06, 48),
     new THREE.MeshStandardMaterial({
-      color: 0x7db6ff,
+      color: 0x78ffe4,
       transparent: true,
       opacity: 0,
-      emissive: 0x2a6da7,
+      emissive: 0x1d8a78,
       emissiveIntensity: 1.4,
       side: THREE.DoubleSide,
       depthWrite: false,
@@ -847,7 +846,7 @@ function buildXPiece(material = pbrMaterialX) {
   const group = new THREE.Group();
 
   for (const angle of [Math.PI / 4, -Math.PI / 4]) {
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.22, 0.28), material);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.24, 0.3), material);
     bar.rotation.y = angle;
     bar.castShadow = true;
     group.add(bar);
@@ -858,7 +857,7 @@ function buildXPiece(material = pbrMaterialX) {
 }
 
 function buildOPiece(material = pbrMaterialO) {
-  const mesh = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.14, 24, 64), material);
+  const mesh = new THREE.Mesh(new THREE.TorusGeometry(0.58, 0.15, 24, 64), material);
   mesh.rotation.x = Math.PI / 2;
   mesh.castShadow = true;
   mesh.scale.set(1.02, 1, 0.96);
@@ -868,23 +867,23 @@ function buildOPiece(material = pbrMaterialO) {
 
 function buildGhostPiece() {
   const ghostMatX = new THREE.MeshPhysicalMaterial({
-    color: 0x8ec9ff,
+    color: 0x8cecff,
     transparent: true,
     opacity: 0.28,
     metalness: 0.72,
     roughness: 0.32,
     envMapIntensity: 1.4,
-    emissive: 0x2f5a82,
+    emissive: 0x1c6f76,
     emissiveIntensity: 0.35,
   });
   const ghostMatO = new THREE.MeshPhysicalMaterial({
-    color: 0xffacc0,
+    color: 0xffd48b,
     transparent: true,
     opacity: 0.28,
     metalness: 0.7,
     roughness: 0.33,
     envMapIntensity: 1.4,
-    emissive: 0x6f2d4a,
+    emissive: 0x684311,
     emissiveIntensity: 0.28,
   });
 
@@ -906,7 +905,7 @@ function buildGhostPiece() {
 function boardToWorld(i) {
   const row = Math.floor(i / 3);
   const col = i % 3;
-  return new THREE.Vector3((col - 1) * 2.1, 0, (row - 1) * 2.1);
+  return new THREE.Vector3((col - 1) * 2.32, 0, (row - 1) * 2.32);
 }
 
 function calculateWinningLine() {
@@ -1123,8 +1122,8 @@ function showWinBeam(line) {
   winBeam = new THREE.Mesh(
     new THREE.BoxGeometry(0.22, fullLength, 0.22),
     new THREE.MeshStandardMaterial({
-      color: winner === Cell.X ? 0x57b3ff : 0xff6f91,
-      emissive: winner === Cell.X ? 0x204e80 : 0x53203a,
+      color: winner === Cell.X ? 0x56d9ff : 0xffbf62,
+      emissive: winner === Cell.X ? 0x164f62 : 0x624113,
       emissiveIntensity: 0.74,
       transparent: true,
       opacity: 0.95,
@@ -1242,7 +1241,7 @@ function updateHoverVisuals() {
     const hoverRing = cell.userData.hoverRing;
 
     if (!playable) {
-      cell.material.color.setHex(0x121a2a);
+      cell.material.color.setHex(0x0c1715);
       if (hoverRing) {
         hoverRing.material.opacity = 0;
         hoverRing.scale.setScalar(1);
@@ -1253,12 +1252,12 @@ function updateHoverVisuals() {
     }
 
     const isHovered = hoveredCell === cell;
-    cell.material.color.setHex(isHovered ? 0x2f4f88 : 0x23304a);
+    cell.material.color.setHex(isHovered ? 0x1f5a50 : 0x18302c);
     cell.position.y = THREE.MathUtils.lerp(cell.position.y, isHovered ? 0.08 : 0, 0.18);
     if (hoverRing) {
       hoverRing.material.opacity = isHovered ? 0.96 : 0.12;
       hoverRing.scale.setScalar(isHovered ? 1.08 : 0.92);
-      hoverRing.material.color.setHex(isHovered ? 0xa2dcff : 0x6c9fff);
+      hoverRing.material.color.setHex(isHovered ? 0x91ffe8 : 0x42cbb4);
     }
   }
 }
@@ -1277,7 +1276,7 @@ function renderBoardState() {
   const winner = game.winner();
   if (winner !== Cell.Empty && !scene.userData.winnerCelebrated) {
     recordScore();
-    const winnerColor = winner === Cell.X ? 0x57b3ff : 0xff6f91;
+    const winnerColor = winner === Cell.X ? 0x56d9ff : 0xffbf62;
     spawnConfetti(winnerColor, new THREE.Vector3(0, 0.4, 0));
     showWinBeam(calculateWinningLine());
     playWinSfx();
@@ -1346,6 +1345,15 @@ function onPointerMove(event) {
     hoveredCell = null;
     updateGhost();
     return;
+  }
+
+  hoveredCell = pickCell(event);
+  updateGhost();
+}
+
+function onPointerDown(event) {
+  if (soundEnabled) {
+    ensureAudio();
   }
 
   hoveredCell = pickCell(event);
@@ -1480,15 +1488,16 @@ function onResize() {
 
 function setup3D() {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x050914);
+  scene.background = new THREE.Color(0x04100d);
   scene.userData.winnerCelebrated = false;
   scene.userData.drawCelebrated = false;
 
-  camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+  camera = new THREE.PerspectiveCamera(44, 1, 0.1, 100);
   camera.position.copy(cameraAnchors.intro);
   camera.lookAt(0, 0, 0);
 
   renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+  renderer.domElement.style.touchAction = "none";
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -1519,23 +1528,23 @@ function setup3D() {
   keyLight.castShadow = true;
   scene.add(keyLight);
 
-  fillLight = new THREE.PointLight(0x6fb3ff, 0.5, 24, 1.6);
+  fillLight = new THREE.PointLight(0x56d9ff, 0.5, 24, 1.6);
   fillLight.position.set(-5.2, 3.8, -4.2);
   scene.add(fillLight);
 
-  rimLight = new THREE.PointLight(0xa66cff, 0.18, 20, 1.5);
+  rimLight = new THREE.PointLight(0xffbf62, 0.18, 20, 1.5);
   rimLight.position.set(0, 7, -8.5);
   scene.add(rimLight);
 
-  ambientLight = new THREE.AmbientLight(0x7f9dff, 0.5);
+  ambientLight = new THREE.AmbientLight(0xb5ffe2, 0.5);
   scene.add(ambientLight);
 
   ambientGlow = new THREE.Mesh(
     new THREE.RingGeometry(2.8, 6.8, 72),
     new THREE.MeshBasicMaterial({
-      color: 0x8eb3ff,
+      color: 0x46f0c2,
       transparent: true,
-      opacity: 0.38,
+      opacity: 0.28,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
       depthWrite: false,
@@ -1572,7 +1581,7 @@ function setup3D() {
   scene.add(starField);
 
   baseCellMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x23304a,
+    color: 0x18302c,
     metalness: 0.32,
     roughness: 0.47,
     clearcoat: 0.58,
@@ -1581,7 +1590,7 @@ function setup3D() {
   });
 
   pbrMaterialX = new THREE.MeshPhysicalMaterial({
-    color: 0x57b3ff,
+    color: 0x56d9ff,
     metalness: 0.82,
     roughness: 0.24,
     clearcoat: 1,
@@ -1590,7 +1599,7 @@ function setup3D() {
   });
 
   pbrMaterialO = new THREE.MeshPhysicalMaterial({
-    color: 0xff6f91,
+    color: 0xffbf62,
     metalness: 0.78,
     roughness: 0.28,
     clearcoat: 1,
@@ -1601,7 +1610,7 @@ function setup3D() {
   const floor = new THREE.Mesh(
     new THREE.CylinderGeometry(8, 8.5, 0.4, 50),
     new THREE.MeshPhysicalMaterial({
-      color: 0x10182a,
+      color: 0x091511,
       metalness: 0.45,
       roughness: 0.63,
       envMapIntensity: 1.2,
@@ -1627,13 +1636,13 @@ function setup3D() {
   ghostPiece = buildGhostPiece();
   boardGroup.add(ghostPiece.group);
 
-  renderer.domElement.addEventListener("click", onClick);
+  renderer.domElement.addEventListener("pointerdown", onPointerDown);
+  renderer.domElement.addEventListener("pointerup", onClick);
   renderer.domElement.addEventListener("pointermove", onPointerMove);
   renderer.domElement.addEventListener("pointerleave", () => {
     hoveredCell = null;
     updateGhost();
   });
-  renderer.domElement.addEventListener("pointerdown", () => ensureAudio(), { once: true });
   window.addEventListener("resize", onResize);
 
   onResize();
@@ -1655,7 +1664,7 @@ if (modeToggle) {
     cameraTarget.copy(cameraAnchors.neutral);
 
     if (vsComputer) {
-      assignRandomVsComputerRoles();
+      assignVsComputerRoles();
     } else {
       humanPlayerCell = Cell.X;
       aiPlayerCell = Cell.O;
@@ -1729,7 +1738,7 @@ async function run() {
   refreshDifficultyButton();
   refreshSoundButton();
   if (vsComputer) {
-    assignRandomVsComputerRoles();
+    assignVsComputerRoles();
   } else {
     humanPlayerCell = Cell.X;
     aiPlayerCell = Cell.O;
@@ -1761,7 +1770,7 @@ async function run() {
     aiThinking = false;
     game.reset();
     if (vsComputer) {
-      assignRandomVsComputerRoles();
+      assignVsComputerRoles();
     }
     resetMoveLog();
     resetScenePieces();
