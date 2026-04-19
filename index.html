@@ -4,30 +4,45 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tic Tac Toe (Rust + WASM + WebGL)</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f1626'/%3E%3Cpath d='M6 6H26V26H6z' fill='none' stroke='%235db2ff' stroke-width='2'/%3E%3Cpath d='M6 16h20M16 6v20' stroke='%23ff7fb7' stroke-width='2'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="./style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.164.1/build/three.module.js",
+          "three/examples/jsm/": "https://unpkg.com/three@0.164.1/examples/jsm/",
+          "three/addons/": "https://unpkg.com/three@0.164.1/examples/jsm/"
+        }
+      }
+    </script>
   </head>
   <body>
-    <main class="game-shell">
-      <header class="game-header">
-        <div class="title-row">
-          <h1>Tic Tac Toe</h1>
-          <span class="pill">WebGL</span>
+    <main class="experience">
+      <section class="viewport" id="viewport" aria-label="3D game canvas"></section>
+      <section class="hud" aria-live="polite">
+        <header class="hud-top">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <div>
+              <h1>Tic Tac Toe</h1>
+              <p>WebGL Arena</p>
+            </div>
+          </div>
+          <p id="mode" class="mode-chip">Mode: Smart AI</p>
+          <p id="score" class="score-chip">You 0 · AI 0 · Draw 0</p>
+          <p id="status" class="status"></p>
+          <p id="move-log" class="move-log">Moves: –</p>
+        </header>
+        <div class="button-row">
+          <button id="mode-toggle" type="button">Play 1v1</button>
+          <button id="quality-toggle" type="button">Quality: Cinematic</button>
+          <button id="difficulty-toggle" type="button">AI: Smart</button>
+          <button id="sound-toggle" type="button">Sound: On</button>
+          <button id="replay-button" type="button">Replay Last</button>
+          <button id="reset-score" type="button">Reset scores</button>
+          <button id="reset" type="button">Reset game</button>
         </div>
-        <p id="score" class="score-chip">You 0 · AI 0 · Draw 0</p>
-        <p id="status" class="status"></p>
-        <p id="mode" class="mode-chip">Mode: Smart AI</p>
-        <p id="move-log" class="move-log">Moves: –</p>
-      </header>
-      <div class="button-row">
-        <button id="mode-toggle" type="button">Play 1v1</button>
-        <button id="quality-toggle" type="button">Quality: Cinematic</button>
-        <button id="difficulty-toggle" type="button">AI: Smart</button>
-        <button id="sound-toggle" type="button">Sound: On</button>
-        <button id="replay-button" type="button">Replay Last</button>
-        <button id="reset-score" type="button">Reset scores</button>
-        <button id="reset" type="button">Reset game</button>
-      </div>
-      <section class="viewport" id="viewport" aria-label="3D board"></section>
+      </section>
     </main>
 
     <script type="module" src="./main.js"></script>
