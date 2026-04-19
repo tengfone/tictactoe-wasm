@@ -1,21 +1,24 @@
 # Tic Tac Toe in WASM + WebGL (Rust)
 
-A Tic Tac Toe demo where game rules run in Rust/WebAssembly and the board is rendered in WebGL using Three.js.
+A static-deployable Tic Tac Toe demo where gameplay rules run in Rust/WebAssembly and rendering uses WebGL (Three.js).
 
-## Notes on scope
+## Feature set
 
-This is a polished demo-style implementation, not a true "AAA" production game pipeline. It focuses on:
+- Rust + WASM gameplay logic (win/draw validation in `src/lib.rs`)
+- WebGL renderer with post-processing bloom + vignette
+- Cinematic camera transitions by game state
+- PBR materials with environment lighting
+- Win/draw confetti particle celebrations
+- Sound effects + mobile haptic feedback
 
-- Rust + WASM gameplay logic
-- interactive 3D board and pieces
-- smooth piece spawn animation and dynamic lighting
+## Local development
 
-## Prerequisites
+### Prerequisites
 
 - Rust (stable)
 - [`wasm-pack`](https://rustwasm.github.io/wasm-pack/installer/)
 
-## Build WASM package
+### Build WASM package
 
 ```bash
 wasm-pack build --target web
@@ -23,12 +26,28 @@ wasm-pack build --target web
 
 This generates a `pkg/` folder used by `main.js`.
 
-## Run locally
-
-Serve this folder with a static file server after building:
+### Run locally
 
 ```bash
 python -m http.server 8080
 ```
 
 Then visit `http://localhost:8080`.
+
+## GitHub Pages deployment
+
+This repo includes `.github/workflows/deploy-pages.yml`.
+
+1. Push this project to a GitHub repo.
+2. In **Settings → Pages**, set **Source** to **GitHub Actions**.
+3. Push to `main`.
+
+The action will:
+
+- build the WASM package with `wasm-pack`
+- upload the site as a static artifact
+- deploy automatically to GitHub Pages
+
+## Notes
+
+This is still a compact demo, not a full AAA production pipeline, but it now includes many "AAA-style" presentation features.
