@@ -90,16 +90,20 @@ let winBeamProgress = 0;
 let vsComputer = true;
 let aiThinking = false;
 let aiMoveToken = 0;
-
-const PLAYER_HUMAN = Cell.X;
-const PLAYER_AI = Cell.O;
+let humanPlayerCell = Cell.X;
+let aiPlayerCell = Cell.O;
 
 function refreshModeChip() {
   if (!modeChip) {
     return;
   }
 
-  modeChip.textContent = vsComputer ? "Mode: Smart AI" : "Mode: Human vs Human";
+  if (vsComputer) {
+    modeChip.textContent = `Mode: Smart AI (${humanPlayerCell === Cell.X ? "You are X" : "You are O"})`;
+    return;
+  }
+
+  modeChip.textContent = "Mode: Human vs Human";
 }
 
 function refreshModeButton() {
@@ -108,6 +112,12 @@ function refreshModeButton() {
   }
 
   modeToggle.textContent = vsComputer ? "Play 1v1" : "Play vs Computer";
+}
+
+function assignRandomVsComputerRoles() {
+  const humanStarts = Math.random() < 0.5;
+  humanPlayerCell = humanStarts ? Cell.X : Cell.O;
+  aiPlayerCell = humanStarts ? Cell.O : Cell.X;
 }
 
 function tryHaptic(pattern) {
@@ -175,7 +185,7 @@ function updateStatus() {
     return;
   }
 
-  const current = game.current_player() === PLAYER_HUMAN ? "You" : "Computer";
+  const current = game.current_player() === humanPlayerCell ? "You" : "Computer";
   const turn = vsComputer ? `Turn: ${current}` : `Turn: ${labels[game.current_player()]}`;
   statusEl.textContent = turn;
 }
@@ -292,11 +302,11 @@ function boardMoves(board) {
 function evaluateBoard(board, depth) {
   const winner = boardWinner(board);
 
-  if (winner === PLAYER_AI) {
+  if (winner === aiPlayerCell) {
     return 1000 - depth;
   }
 
-  if (winner === PLAYER_HUMAN) {
+  if (winner === humanPlayerCell) {
     return -1000 + depth;
   }
 
@@ -314,9 +324,9 @@ function minimax(board, depth, player) {
   }
 
   const moves = boardMoves(board);
-  const maximizing = player === PLAYER_AI;
+  const maximizing = player === aiPlayerCell;
   let bestScore = maximizing ? -Infinity : Infinity;
-  const nextPlayer = player === PLAYER_HUMAN ? PLAYER_AI : PLAYER_HUMAN;
+  const nextPlayer = player === humanPlayerCell ? aiPlayerCell : humanPlayerCell;
 
   for (const move of moves) {
     board[move] = player;
@@ -350,8 +360,8 @@ function chooseSmartMove() {
   }
 
   for (const move of moves) {
-    board[move] = PLAYER_AI;
-    const score = minimax(board, 1, PLAYER_HUMAN);
+    board[move] = aiPlayerCell;
+    const score = minimax(board, 1, humanPlayerCell);
     board[move] = Cell.Empty;
 
     if (score > bestScore) {
@@ -368,7 +378,7 @@ function playComputerTurn() {
     return;
   }
 
-  if (game.winner() !== Cell.Empty || game.is_draw() || game.current_player() !== PLAYER_AI) {
+  if (game.winner() !== Cell.Empty || game.is_draw() || game.current_player() !== aiPlayerCell) {
     return;
   }
 
@@ -387,7 +397,7 @@ function playComputerTurn() {
       return;
     }
 
-    if (game.winner() !== Cell.Empty || game.is_draw() || game.current_player() !== PLAYER_AI) {
+    if (game.winner() !== Cell.Empty || game.is_draw() || game.current_player() !== aiPlayerCell) {
       aiThinking = false;
       return;
     }
@@ -617,7 +627,7 @@ function onPointerMove(event) {
 }
 
 function onClick(event) {
-  if (aiThinking || (vsComputer && game.current_player() !== PLAYER_HUMAN)) {
+  if (aiThinking || (vsComputer && game.current_player() !== humanPlayerCell)) {
     return;
   }
 
@@ -822,12 +832,22 @@ if (modeToggle) {
     vsComputer = !vsComputer;
     aiMoveToken += 1;
     aiThinking = false;
+    game.reset();
+    resetScenePieces();
+    cameraTarget.copy(cameraAnchors.neutral);
+
+    if (vsComputer) {
+      assignRandomVsComputerRoles();
+    } else {
+      humanPlayerCell = Cell.X;
+      aiPlayerCell = Cell.O;
+    }
 
     refreshModeChip();
     refreshModeButton();
     renderBoardState();
 
-    if (vsComputer && game.current_player() === PLAYER_AI && !game.winner() && !game.is_draw()) {
+    if (vsComputer && game.current_player() === aiPlayerCell && !game.winner() && !game.is_draw()) {
       playComputerTurn();
     }
   });
@@ -837,10 +857,16 @@ async function run() {
   await init();
   game = new Game();
   setup3D();
+  if (vsComputer) {
+    assignRandomVsComputerRoles();
+  } else {
+    humanPlayerCell = Cell.X;
+    aiPlayerCell = Cell.O;
+  }
   renderBoardState();
   refreshModeChip();
   refreshModeButton();
-  if (vsComputer && game.current_player() === PLAYER_AI) {
+  if (vsComputer && game.current_player() === aiPlayerCell) {
     playComputerTurn();
   }
 
@@ -852,11 +878,14 @@ async function run() {
     aiMoveToken += 1;
     aiThinking = false;
     game.reset();
+    if (vsComputer) {
+      assignRandomVsComputerRoles();
+    }
     resetScenePieces();
     cameraTarget.copy(cameraAnchors.neutral);
     renderBoardState();
 
-    if (vsComputer && game.current_player() === PLAYER_AI) {
+    if (vsComputer && game.current_player() === aiPlayerCell) {
       playComputerTurn();
     }
   });
