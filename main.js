@@ -17,12 +17,24 @@ const labels = {
 };
 
 const cameraAnchors = {
+  intro: new THREE.Vector3(0, 11.2, 13.8),
   neutral: new THREE.Vector3(0, 7.5, 9.25),
   xTurn: new THREE.Vector3(-2.3, 7.7, 8.6),
   oTurn: new THREE.Vector3(2.3, 7.7, 8.6),
   win: new THREE.Vector3(0, 6.2, 6.5),
   draw: new THREE.Vector3(0, 9.5, 11.2),
 };
+
+const WIN_LINES = [
+  [0, 1, 2],
+  [3, 4, 5],
+  [6, 7, 8],
+  [0, 3, 6],
+  [1, 4, 7],
+  [2, 5, 8],
+  [0, 4, 8],
+  [2, 4, 6],
+];
 
 const VignetteShader = {
   uniforms: {
@@ -68,7 +80,11 @@ let pbrMaterialX;
 let pbrMaterialO;
 let baseCellMaterial;
 let audioCtx;
-let cameraTarget = cameraAnchors.neutral.clone();
+let cameraTarget = cameraAnchors.intro.clone();
+let hoveredCell = null;
+let ghostPiece = null;
+let winBeam = null;
+let winBeamProgress = 0;
 
 function tryHaptic(pattern) {
   if (navigator.vibrate) {
@@ -145,11 +161,11 @@ function buildCellGeometry() {
   return mesh;
 }
 
-function buildXPiece() {
+function buildXPiece(material = pbrMaterialX) {
   const group = new THREE.Group();
 
   for (const angle of [Math.PI / 4, -Math.PI / 4]) {
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.22, 0.28), pbrMaterialX);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.22, 0.28), material);
     bar.rotation.y = angle;
     bar.castShadow = true;
     group.add(bar);
@@ -158,11 +174,44 @@ function buildXPiece() {
   return group;
 }
 
-function buildOPiece() {
-  const mesh = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.14, 24, 64), pbrMaterialO);
+function buildOPiece(material = pbrMaterialO) {
+  const mesh = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.14, 24, 64), material);
   mesh.rotation.x = Math.PI / 2;
   mesh.castShadow = true;
   return mesh;
+}
+
+function buildGhostPiece() {
+  const ghostMatX = new THREE.MeshPhysicalMaterial({
+    color: 0x8ec9ff,
+    transparent: true,
+    opacity: 0.35,
+    metalness: 0.72,
+    roughness: 0.32,
+    envMapIntensity: 1.4,
+  });
+  const ghostMatO = new THREE.MeshPhysicalMaterial({
+    color: 0xffacc0,
+    transparent: true,
+    opacity: 0.35,
+    metalness: 0.7,
+    roughness: 0.33,
+    envMapIntensity: 1.4,
+  });
+
+  const x = buildXPiece(ghostMatX);
+  const o = buildOPiece(ghostMatO);
+
+  const group = new THREE.Group();
+  group.add(x);
+  group.add(o);
+
+  x.visible = false;
+  o.visible = false;
+  group.visible = false;
+  group.position.y = 0.28;
+
+  return { group, x, o };
 }
 
 function boardToWorld(i) {
@@ -171,8 +220,52 @@ function boardToWorld(i) {
   return new THREE.Vector3((col - 1) * 2.1, 0, (row - 1) * 2.1);
 }
 
+function calculateWinningLine() {
+  for (const [a, b, c] of WIN_LINES) {
+    const va = game.get_cell(a);
+    const vb = game.get_cell(b);
+    const vc = game.get_cell(c);
+
+    if (va !== Cell.Empty && va === vb && vb === vc) {
+      return [a, c, va];
+    }
+  }
+
+  return null;
+}
+
+function showWinBeam(line) {
+  if (!line) {
+    return;
+  }
+
+  const [startCell, endCell, winner] = line;
+  const start = boardToWorld(startCell);
+  const end = boardToWorld(endCell);
+  const midpoint = start.clone().add(end).multiplyScalar(0.5);
+
+  const direction = end.clone().sub(start);
+  const fullLength = direction.length();
+
+  winBeam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.08, 1, 16),
+    new THREE.MeshBasicMaterial({
+      color: winner === Cell.X ? 0x57b3ff : 0xff6f91,
+      transparent: true,
+      opacity: 0.95,
+    })
+  );
+
+  winBeam.position.set(midpoint.x, 0.52, midpoint.z);
+  winBeam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
+  winBeam.scale.set(1, 0.001, 1);
+  winBeam.userData.fullLength = fullLength;
+  scene.add(winBeam);
+  winBeamProgress = 0;
+}
+
 function spawnConfetti(color, center) {
-  const count = 110;
+  const count = 140;
   const positions = new Float32Array(count * 3);
   const velocities = [];
 
@@ -183,9 +276,9 @@ function spawnConfetti(color, center) {
 
     velocities.push(
       new THREE.Vector3(
-        (Math.random() - 0.5) * 0.07,
-        Math.random() * 0.11 + 0.03,
-        (Math.random() - 0.5) * 0.07
+        (Math.random() - 0.5) * 0.085,
+        Math.random() * 0.12 + 0.04,
+        (Math.random() - 0.5) * 0.085
       )
     );
   }
@@ -203,7 +296,6 @@ function spawnConfetti(color, center) {
 
   const points = new THREE.Points(geometry, material);
   scene.add(points);
-
   confettiBursts.push({ points, velocities, life: 1.45 });
 }
 
@@ -241,6 +333,40 @@ function setCameraMood() {
   cameraTarget.copy(game.current_player() === Cell.X ? cameraAnchors.xTurn : cameraAnchors.oTurn);
 }
 
+function updateGhost() {
+  if (!ghostPiece) {
+    return;
+  }
+
+  const gameFinished = game.winner() !== Cell.Empty || game.is_draw();
+  if (gameFinished || !hoveredCell || hoveredCell.userData.value !== Cell.Empty) {
+    ghostPiece.group.visible = false;
+    return;
+  }
+
+  ghostPiece.group.visible = true;
+  ghostPiece.x.visible = game.current_player() === Cell.X;
+  ghostPiece.o.visible = game.current_player() === Cell.O;
+  ghostPiece.group.position.copy(hoveredCell.position).add(new THREE.Vector3(0, 0.28, 0));
+}
+
+function updateHoverVisuals() {
+  for (const cell of cells) {
+    const value = cell.userData.value;
+    const playable = game.winner() === Cell.Empty && !game.is_draw() && value === Cell.Empty;
+
+    if (!playable) {
+      cell.material.color.setHex(0x121a2a);
+      cell.position.y = THREE.MathUtils.lerp(cell.position.y, 0, 0.18);
+      continue;
+    }
+
+    const isHovered = hoveredCell === cell;
+    cell.material.color.setHex(isHovered ? 0x2f4f88 : 0x23304a);
+    cell.position.y = THREE.MathUtils.lerp(cell.position.y, isHovered ? 0.08 : 0, 0.18);
+  }
+}
+
 function renderBoardState() {
   for (let i = 0; i < 9; i++) {
     const existing = cells[i].userData.value;
@@ -250,14 +376,13 @@ function renderBoardState() {
     }
 
     cells[i].userData.value = value;
-    const playable = game.winner() === Cell.Empty && !game.is_draw() && value === Cell.Empty;
-    cells[i].material.color.setHex(playable ? 0x23304a : 0x121a2a);
   }
 
   const winner = game.winner();
   if (winner !== Cell.Empty && !scene.userData.winnerCelebrated) {
     const winnerColor = winner === Cell.X ? 0x57b3ff : 0xff6f91;
     spawnConfetti(winnerColor, new THREE.Vector3(0, 0.4, 0));
+    showWinBeam(calculateWinningLine());
     playWinSfx();
     tryHaptic([30, 20, 40]);
     scene.userData.winnerCelebrated = true;
@@ -285,28 +410,50 @@ function resetScenePieces() {
   }
   confettiBursts = [];
 
+  if (winBeam) {
+    scene.remove(winBeam);
+    winBeam.geometry.dispose();
+    winBeam.material.dispose();
+    winBeam = null;
+    winBeamProgress = 0;
+  }
+
+  hoveredCell = null;
+
   for (let i = 0; i < 9; i++) {
     cells[i].userData.value = Cell.Empty;
+    cells[i].position.y = 0;
   }
 
   scene.userData.winnerCelebrated = false;
   scene.userData.drawCelebrated = false;
 }
 
-function onClick(event) {
+function pickCell(event) {
   const rect = renderer.domElement.getBoundingClientRect();
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
   raycaster.setFromCamera(pointer, camera);
   const hit = raycaster.intersectObjects(cells).find((item) => item.object.userData.index !== undefined);
-  if (!hit) {
+  return hit ? hit.object : null;
+}
+
+function onPointerMove(event) {
+  hoveredCell = pickCell(event);
+  updateGhost();
+}
+
+function onClick(event) {
+  const picked = pickCell(event);
+  if (!picked) {
     return;
   }
 
-  const index = hit.object.userData.index;
+  const index = picked.userData.index;
   if (game.play(index)) {
     renderBoardState();
+    updateGhost();
   }
 }
 
@@ -337,6 +484,16 @@ function updateConfetti(delta) {
   }
 }
 
+function animateWinBeam() {
+  if (!winBeam || winBeamProgress >= 1) {
+    return;
+  }
+
+  winBeamProgress = Math.min(1, winBeamProgress + 0.045);
+  winBeam.scale.y = THREE.MathUtils.lerp(0.001, winBeam.userData.fullLength, winBeamProgress);
+  winBeam.material.opacity = 0.35 + 0.6 * Math.sin(winBeamProgress * Math.PI);
+}
+
 let prevTime = performance.now();
 function animate(now) {
   requestAnimationFrame(animate);
@@ -351,6 +508,9 @@ function animate(now) {
   }
 
   updateConfetti(delta);
+  updateHoverVisuals();
+  updateGhost();
+  animateWinBeam();
 
   camera.position.lerp(cameraTarget, 0.05);
   camera.lookAt(0, 0, 0);
@@ -377,7 +537,7 @@ function setup3D() {
   scene.userData.drawCelebrated = false;
 
   camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-  camera.position.copy(cameraAnchors.neutral);
+  camera.position.copy(cameraAnchors.intro);
   camera.lookAt(0, 0, 0);
 
   renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
@@ -465,7 +625,15 @@ function setup3D() {
     cells.push(cell);
   }
 
+  ghostPiece = buildGhostPiece();
+  boardGroup.add(ghostPiece.group);
+
   renderer.domElement.addEventListener("click", onClick);
+  renderer.domElement.addEventListener("pointermove", onPointerMove);
+  renderer.domElement.addEventListener("pointerleave", () => {
+    hoveredCell = null;
+    updateGhost();
+  });
   renderer.domElement.addEventListener("pointerdown", () => ensureAudio(), { once: true });
   window.addEventListener("resize", onResize);
 
@@ -478,6 +646,10 @@ async function run() {
   game = new Game();
   setup3D();
   renderBoardState();
+
+  setTimeout(() => {
+    cameraTarget.copy(cameraAnchors.neutral);
+  }, 260);
 
   resetButton.addEventListener("click", () => {
     game.reset();

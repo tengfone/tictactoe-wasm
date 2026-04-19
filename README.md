@@ -1,14 +1,16 @@
 # Tic Tac Toe in WASM + WebGL (Rust)
 
-A static-deployable Tic Tac Toe demo where gameplay rules run in Rust/WebAssembly and rendering uses WebGL (Three.js).
+A fully client-side Tic Tac Toe demo where gameplay rules run in Rust/WebAssembly and rendering uses WebGL (Three.js), suitable for static hosting on GitHub Pages.
 
 ## Feature set
 
 - Rust + WASM gameplay logic (win/draw validation in `src/lib.rs`)
 - WebGL renderer with post-processing bloom + vignette
-- Cinematic camera transitions by game state
+- Cinematic camera transitions (intro + turn/win/draw framing)
 - PBR materials with environment lighting
 - Win/draw confetti particle celebrations
+- Animated neon win-beam highlighting the winning line
+- Hover tile lift/glow + ghost piece preview before placement
 - Sound effects + mobile haptic feedback
 
 ## Local development
@@ -47,7 +49,3 @@ The action will:
 - build the WASM package with `wasm-pack`
 - upload the site as a static artifact
 - deploy automatically to GitHub Pages
-
-## Notes
-
-This is still a compact demo, not a full AAA production pipeline, but it now includes many "AAA-style" presentation features.
