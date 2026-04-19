@@ -1,16 +1,66 @@
 import init, { Cell, Game } from "./pkg/tic_tac_toe_wasm.js";
-import * as THREE from "three";
-import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
-import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
-import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
-import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
-import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import * as THREE from "https://unpkg.com/three@0.164.1/build/three.module.js";
+import { EffectComposer } from "https://unpkg.com/three@0.164.1/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "https://unpkg.com/three@0.164.1/examples/jsm/postprocessing/RenderPass.js";
+import { ShaderPass } from "https://unpkg.com/three@0.164.1/examples/jsm/postprocessing/ShaderPass.js";
+import { UnrealBloomPass } from "https://unpkg.com/three@0.164.1/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { RoomEnvironment } from "https://unpkg.com/three@0.164.1/examples/jsm/environments/RoomEnvironment.js";
 
 const statusEl = document.getElementById("status");
 const modeToggle = document.getElementById("mode-toggle");
 const modeChip = document.getElementById("mode");
+const scoreEl = document.getElementById("score");
 const resetButton = document.getElementById("reset");
 const viewport = document.getElementById("viewport");
+const qualityToggle = document.getElementById("quality-toggle");
+
+const scoreKey = "ttt-wasm-score-v2";
+const qualityKey = "ttt-wasm-quality-v1";
+const SCORE_TEMPLATE = {
+  vsComputer: { you: 0, ai: 0, draw: 0 },
+  vsHuman: { x: 0, o: 0, draw: 0 },
+};
+const baseScoreTemplate = () => ({
+  vsComputer: { ...SCORE_TEMPLATE.vsComputer },
+  vsHuman: { ...SCORE_TEMPLATE.vsHuman },
+});
+
+const QUALITY_MODES = ["performance", "balanced", "cinematic"];
+const QUALITY_PRESETS = {
+  performance: {
+    label: "Performance",
+    maxPixelRatio: 1,
+    toneExposure: 0.96,
+    toneMapping: THREE.ACESFilmicToneMapping,
+    bloom: { strength: 0.22, radius: 0.34, threshold: 0.92 },
+    vignette: { offset: 1.0, darkness: 1.0 },
+    shadows: false,
+    lights: { key: 1.85, fill: 0.22, rim: 0.16, ambient: 0.42 },
+    confettiScale: 0.4,
+  },
+  balanced: {
+    label: "Balanced",
+    maxPixelRatio: 1.4,
+    toneExposure: 1.0,
+    toneMapping: THREE.ACESFilmicToneMapping,
+    bloom: { strength: 0.46, radius: 0.48, threshold: 0.84 },
+    vignette: { offset: 0.98, darkness: 1.08 },
+    shadows: true,
+    lights: { key: 2.05, fill: 0.34, rim: 0.2, ambient: 0.52 },
+    confettiScale: 0.72,
+  },
+  cinematic: {
+    label: "Cinematic",
+    maxPixelRatio: 2,
+    toneExposure: 1.09,
+    toneMapping: THREE.ACESFilmicToneMapping,
+    bloom: { strength: 0.76, radius: 0.66, threshold: 0.68 },
+    vignette: { offset: 0.96, darkness: 1.16 },
+    shadows: true,
+    lights: { key: 2.35, fill: 0.48, rim: 0.24, ambient: 0.58 },
+    confettiScale: 1,
+  },
+};
 
 const labels = {
   [Cell.Empty]: "",
@@ -92,6 +142,15 @@ let aiThinking = false;
 let aiMoveToken = 0;
 let humanPlayerCell = Cell.X;
 let aiPlayerCell = Cell.O;
+let scoreState = loadScoreState();
+let qualityMode = "cinematic";
+let bloomPass;
+let vignettePass;
+let keyLight;
+let fillLight;
+let rimLight;
+let ambientLight;
+let statusPulseTimer = null;
 
 function refreshModeChip() {
   if (!modeChip) {
@@ -112,6 +171,147 @@ function refreshModeButton() {
   }
 
   modeToggle.textContent = vsComputer ? "Play 1v1" : "Play vs Computer";
+}
+
+function refreshScoreChip() {
+  if (!scoreEl) {
+    return;
+  }
+
+  if (vsComputer) {
+    scoreEl.textContent = `You ${scoreState.vsComputer.you} · AI ${scoreState.vsComputer.ai} · Draw ${scoreState.vsComputer.draw}`;
+    return;
+  }
+
+  scoreEl.textContent = `X ${scoreState.vsHuman.x} · O ${scoreState.vsHuman.o} · Draw ${scoreState.vsHuman.draw}`;
+}
+
+function readSavedScore() {
+  if (!window.localStorage) {
+    return baseScoreTemplate();
+  }
+
+  try {
+    const raw = window.localStorage.getItem(scoreKey);
+    if (!raw) {
+      return baseScoreTemplate();
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return baseScoreTemplate();
+    }
+
+    const normalizeSection = (section, expectedKeys) => {
+      const normalized = {};
+      for (const key of expectedKeys) {
+        const value = Number(section?.[key]);
+        normalized[key] = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+      }
+      return normalized;
+    };
+
+    return {
+      vsComputer: normalizeSection(parsed.vsComputer, ["you", "ai", "draw"]),
+      vsHuman: normalizeSection(parsed.vsHuman, ["x", "o", "draw"]),
+    };
+  } catch (error) {
+    console.error("Unable to parse score state:", error);
+    return baseScoreTemplate();
+  }
+}
+
+function loadScoreState() {
+  return readSavedScore();
+}
+
+function saveScoreState() {
+  if (!window.localStorage) {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(scoreKey, JSON.stringify(scoreState));
+  } catch (error) {
+    console.warn("Unable to persist score state:", error);
+  }
+}
+
+function refreshQualityButton() {
+  if (!qualityToggle) {
+    return;
+  }
+
+  const preset = QUALITY_PRESETS[qualityMode];
+  qualityToggle.textContent = `Quality: ${preset.label}`;
+}
+
+function readSavedQuality() {
+  if (!window.localStorage) {
+    return "cinematic";
+  }
+
+  try {
+    const raw = window.localStorage.getItem(qualityKey);
+    return QUALITY_PRESETS[raw] ? raw : "cinematic";
+  } catch (error) {
+    console.warn("Unable to load quality mode:", error);
+    return "cinematic";
+  }
+}
+
+function applyQualityMode() {
+  const preset = QUALITY_PRESETS[qualityMode];
+  if (!renderer || !bloomPass || !vignettePass) {
+    return;
+  }
+
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, preset.maxPixelRatio));
+  renderer.shadowMap.enabled = preset.shadows;
+  renderer.toneMapping = preset.toneMapping;
+  renderer.toneMappingExposure = preset.toneExposure;
+
+  bloomPass.strength = preset.bloom.strength;
+  bloomPass.radius = preset.bloom.radius;
+  bloomPass.threshold = preset.bloom.threshold;
+
+  vignettePass.uniforms.offset.value = preset.vignette.offset;
+  vignettePass.uniforms.darkness.value = preset.vignette.darkness;
+
+  keyLight.intensity = preset.lights.key;
+  fillLight.intensity = preset.lights.fill;
+  rimLight.intensity = preset.lights.rim;
+  ambientLight.intensity = preset.lights.ambient;
+
+  keyLight.castShadow = preset.shadows;
+  if (keyLight.shadow && preset.shadows) {
+    keyLight.shadow.mapSize.set(Math.round(1024 * preset.maxPixelRatio), Math.round(1024 * preset.maxPixelRatio));
+    keyLight.shadow.radius = preset.label === "Performance" ? 2 : 3;
+  }
+}
+
+function setQualityMode(nextMode) {
+  if (!QUALITY_PRESETS[nextMode]) {
+    return;
+  }
+
+  qualityMode = nextMode;
+  applyQualityMode();
+  refreshQualityButton();
+
+  if (window.localStorage) {
+    try {
+      window.localStorage.setItem(qualityKey, qualityMode);
+    } catch (error) {
+      console.warn("Unable to persist quality mode:", error);
+    }
+  }
+}
+
+function cycleQualityMode() {
+  const currentIndex = QUALITY_MODES.indexOf(qualityMode);
+  const nextIndex = (currentIndex + 1) % QUALITY_MODES.length;
+  setQualityMode(QUALITY_MODES[nextIndex]);
 }
 
 function assignRandomVsComputerRoles() {
@@ -175,25 +375,107 @@ function playDrawSfx() {
 }
 
 function updateStatus() {
+  if (statusPulseTimer) {
+    clearTimeout(statusPulseTimer);
+  }
+
+  if (!statusEl) {
+    return;
+  }
+
+  statusEl.classList.remove("status--pulse");
   if (game.winner() !== Cell.Empty) {
-    statusEl.textContent = `${labels[game.winner()]} wins!`;
+    const winnerText = labels[game.winner()];
+    const winnerLabel = vsComputer
+      ? winnerText === labels[humanPlayerCell]
+        ? "You"
+        : "Computer"
+      : winnerText;
+    statusEl.textContent = `${winnerLabel} wins!`;
+    statusEl.classList.add("status--pulse");
+    statusPulseTimer = window.setTimeout(() => {
+      statusEl.classList.remove("status--pulse");
+    }, 220);
     return;
   }
 
   if (game.is_draw()) {
     statusEl.textContent = "Draw game.";
+    statusEl.classList.add("status--pulse");
+    statusPulseTimer = window.setTimeout(() => {
+      statusEl.classList.remove("status--pulse");
+    }, 220);
     return;
   }
 
   const current = game.current_player() === humanPlayerCell ? "You" : "Computer";
   const turn = vsComputer ? `Turn: ${current}` : `Turn: ${labels[game.current_player()]}`;
   statusEl.textContent = turn;
+  statusEl.classList.add("status--pulse");
+  statusPulseTimer = window.setTimeout(() => {
+    statusEl.classList.remove("status--pulse");
+  }, 140);
+}
+
+function recordScore() {
+  if (game.winner() !== Cell.Empty && !scene.userData.scoreRecorded) {
+    const winner = game.winner();
+    if (vsComputer) {
+      if (winner === humanPlayerCell) {
+        scoreState.vsComputer.you += 1;
+      } else if (winner === aiPlayerCell) {
+        scoreState.vsComputer.ai += 1;
+      }
+    } else {
+      if (winner === Cell.X) {
+        scoreState.vsHuman.x += 1;
+      } else if (winner === Cell.O) {
+        scoreState.vsHuman.o += 1;
+      }
+    }
+
+    saveScoreState();
+    refreshScoreChip();
+    scene.userData.scoreRecorded = true;
+    return;
+  }
+
+  if (game.is_draw() && !scene.userData.drawRecorded) {
+    if (vsComputer) {
+      scoreState.vsComputer.draw += 1;
+    } else {
+      scoreState.vsHuman.draw += 1;
+    }
+
+    saveScoreState();
+    refreshScoreChip();
+    scene.userData.drawRecorded = true;
+  }
 }
 
 function buildCellGeometry() {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.2, 1.8), baseCellMaterial.clone());
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+
+  const hoverRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.72, 0.94, 42),
+    new THREE.MeshStandardMaterial({
+      color: 0x7db6ff,
+      transparent: true,
+      opacity: 0,
+      emissive: 0x2a6da7,
+      emissiveIntensity: 1.4,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+  );
+  hoverRing.rotation.x = -Math.PI / 2;
+  hoverRing.position.y = 0.11;
+  hoverRing.renderOrder = 2;
+
+  mesh.add(hoverRing);
+  mesh.userData.hoverRing = hoverRing;
   return mesh;
 }
 
@@ -207,6 +489,7 @@ function buildXPiece(material = pbrMaterialX) {
     group.add(bar);
   }
 
+  group.rotation.y = Math.PI / 12;
   return group;
 }
 
@@ -214,6 +497,8 @@ function buildOPiece(material = pbrMaterialO) {
   const mesh = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.14, 24, 64), material);
   mesh.rotation.x = Math.PI / 2;
   mesh.castShadow = true;
+  mesh.scale.set(1.02, 1, 0.96);
+  mesh.userData.spin = true;
   return mesh;
 }
 
@@ -221,18 +506,22 @@ function buildGhostPiece() {
   const ghostMatX = new THREE.MeshPhysicalMaterial({
     color: 0x8ec9ff,
     transparent: true,
-    opacity: 0.35,
+    opacity: 0.28,
     metalness: 0.72,
     roughness: 0.32,
     envMapIntensity: 1.4,
+    emissive: 0x2f5a82,
+    emissiveIntensity: 0.35,
   });
   const ghostMatO = new THREE.MeshPhysicalMaterial({
     color: 0xffacc0,
     transparent: true,
-    opacity: 0.35,
+    opacity: 0.28,
     metalness: 0.7,
     roughness: 0.33,
     envMapIntensity: 1.4,
+    emissive: 0x6f2d4a,
+    emissiveIntensity: 0.28,
   });
 
   const x = buildXPiece(ghostMatX);
@@ -390,6 +679,8 @@ function playComputerTurn() {
   const token = ++aiMoveToken;
   const move = chooseSmartMove();
   statusEl.textContent = "Computer is thinking…";
+  const thinkingDelay =
+    qualityMode === "performance" ? 150 : qualityMode === "balanced" ? 220 : 320;
 
   setTimeout(() => {
     if (token !== aiMoveToken) {
@@ -409,7 +700,7 @@ function playComputerTurn() {
 
     aiThinking = false;
     updateStatus();
-  }, 240);
+  }, thinkingDelay);
 }
 
 function showWinBeam(line) {
@@ -438,7 +729,8 @@ function showWinBeam(line) {
   );
 
   winBeam.position.set(midpoint.x, 0.52, midpoint.z);
-  winBeam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
+  const flatDirection = new THREE.Vector3(direction.x, 0, direction.z).normalize();
+  winBeam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), flatDirection);
   winBeam.scale.set(1, 0.001, 1);
   winBeam.userData.fullLength = fullLength;
   winBeam.renderOrder = 2;
@@ -447,7 +739,8 @@ function showWinBeam(line) {
 }
 
 function spawnConfetti(color, center) {
-  const count = 140;
+  const preset = QUALITY_PRESETS[qualityMode];
+  const count = Math.max(12, Math.round(140 * preset.confettiScale));
   const positions = new Float32Array(count * 3);
   const velocities = [];
 
@@ -472,7 +765,7 @@ function spawnConfetti(color, center) {
     color,
     size: 0.09,
     transparent: true,
-    opacity: 0.95,
+    opacity: preset === QUALITY_PRESETS.performance ? 0.8 : 0.95,
     depthWrite: false,
   });
 
@@ -495,6 +788,8 @@ function addPiece(index, cell) {
   piece.position.set(pos.x, 0.28, pos.z);
   piece.scale.setScalar(0.001);
   boardGroup.add(piece);
+  piece.rotation.x = (Math.random() - 0.5) * 0.06;
+  piece.rotation.z = (Math.random() - 0.5) * 0.08;
   pieces.push({ piece, bornAt: performance.now() });
 
   playMoveSfx(cell);
@@ -530,15 +825,23 @@ function updateGhost() {
   ghostPiece.x.visible = game.current_player() === Cell.X;
   ghostPiece.o.visible = game.current_player() === Cell.O;
   ghostPiece.group.position.copy(hoveredCell.position).add(new THREE.Vector3(0, 0.28, 0));
+  const pulse = 0.94 + 0.05 * (1 - Math.abs(Math.sin(performance.now() * 0.008)));
+  ghostPiece.group.scale.set(pulse, pulse, pulse);
 }
 
 function updateHoverVisuals() {
   for (const cell of cells) {
     const value = cell.userData.value;
     const playable = game.winner() === Cell.Empty && !game.is_draw() && value === Cell.Empty;
+    const hoverRing = cell.userData.hoverRing;
 
     if (!playable) {
       cell.material.color.setHex(0x121a2a);
+      if (hoverRing) {
+        hoverRing.material.opacity = 0;
+        hoverRing.scale.setScalar(1);
+      }
+
       cell.position.y = THREE.MathUtils.lerp(cell.position.y, 0, 0.18);
       continue;
     }
@@ -546,6 +849,11 @@ function updateHoverVisuals() {
     const isHovered = hoveredCell === cell;
     cell.material.color.setHex(isHovered ? 0x2f4f88 : 0x23304a);
     cell.position.y = THREE.MathUtils.lerp(cell.position.y, isHovered ? 0.08 : 0, 0.18);
+    if (hoverRing) {
+      hoverRing.material.opacity = isHovered ? 0.96 : 0.12;
+      hoverRing.scale.setScalar(isHovered ? 1.08 : 0.92);
+      hoverRing.material.color.setHex(isHovered ? 0xa2dcff : 0x6c9fff);
+    }
   }
 }
 
@@ -562,6 +870,7 @@ function renderBoardState() {
 
   const winner = game.winner();
   if (winner !== Cell.Empty && !scene.userData.winnerCelebrated) {
+    recordScore();
     const winnerColor = winner === Cell.X ? 0x57b3ff : 0xff6f91;
     spawnConfetti(winnerColor, new THREE.Vector3(0, 0.4, 0));
     showWinBeam(calculateWinningLine());
@@ -569,6 +878,7 @@ function renderBoardState() {
     tryHaptic([30, 20, 40]);
     scene.userData.winnerCelebrated = true;
   } else if (game.is_draw() && !scene.userData.drawCelebrated) {
+    recordScore();
     spawnConfetti(0xffffff, new THREE.Vector3(0, 0.4, 0));
     playDrawSfx();
     tryHaptic([20, 20, 20]);
@@ -609,6 +919,10 @@ function resetScenePieces() {
 
   scene.userData.winnerCelebrated = false;
   scene.userData.drawCelebrated = false;
+  scene.userData.scoreRecorded = false;
+  scene.userData.drawRecorded = false;
+
+  boardGroup.rotation.set(0, 0, 0);
 }
 
 function pickCell(event) {
@@ -692,12 +1006,25 @@ function animate(now) {
     const t = Math.min(1, (now - entry.bornAt) / 240);
     const eased = 1 - Math.pow(1 - t, 3);
     entry.piece.scale.setScalar(eased);
+
+    const settle = Math.sin(t * Math.PI);
+    entry.piece.position.y = 0.28 + 0.06 * (1 - t) * settle;
+    entry.piece.rotation.y += 0.03 * (1 - t);
+    if (entry.piece.userData.spin) {
+      entry.piece.rotation.z += 0.02 * (1 - t);
+    } else {
+      entry.piece.rotation.x += 0.015 * (1 - t);
+    }
   }
 
   updateConfetti(delta);
   updateHoverVisuals();
   updateGhost();
   animateWinBeam();
+
+  const boardDrift = qualityMode === "performance" ? 0.0005 : 0.0015;
+  boardGroup.rotation.y = Math.sin(now * boardDrift) * 0.01;
+  boardGroup.rotation.z = Math.cos(now * (boardDrift * 0.7)) * 0.004;
 
   camera.position.lerp(cameraTarget, 0.05);
   camera.lookAt(0, 0, 0);
@@ -743,20 +1070,30 @@ function setup3D() {
   composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
 
-  const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.7, 0.5, 0.86);
+  bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.7, 0.5, 0.86);
   composer.addPass(bloomPass);
 
-  const vignettePass = new ShaderPass(VignetteShader);
+  vignettePass = new ShaderPass(VignetteShader);
   composer.addPass(vignettePass);
 
   raycaster = new THREE.Raycaster();
   pointer = new THREE.Vector2();
 
-  const key = new THREE.DirectionalLight(0xffffff, 2.3);
-  key.position.set(7, 12, 8);
-  key.castShadow = true;
-  scene.add(key);
-  scene.add(new THREE.AmbientLight(0x7f9dff, 0.5));
+  keyLight = new THREE.DirectionalLight(0xffffff, 2.3);
+  keyLight.position.set(7, 12, 8);
+  keyLight.castShadow = true;
+  scene.add(keyLight);
+
+  fillLight = new THREE.PointLight(0x6fb3ff, 0.5, 24, 1.6);
+  fillLight.position.set(-5.2, 3.8, -4.2);
+  scene.add(fillLight);
+
+  rimLight = new THREE.PointLight(0xa66cff, 0.18, 20, 1.5);
+  rimLight.position.set(0, 7, -8.5);
+  scene.add(rimLight);
+
+  ambientLight = new THREE.AmbientLight(0x7f9dff, 0.5);
+  scene.add(ambientLight);
 
   baseCellMaterial = new THREE.MeshPhysicalMaterial({
     color: 0x23304a,
@@ -845,6 +1182,7 @@ if (modeToggle) {
 
     refreshModeChip();
     refreshModeButton();
+    refreshScoreChip();
     renderBoardState();
 
     if (vsComputer && game.current_player() === aiPlayerCell && !game.winner() && !game.is_draw()) {
@@ -853,19 +1191,28 @@ if (modeToggle) {
   });
 }
 
+if (qualityToggle) {
+  qualityToggle.addEventListener("click", cycleQualityMode);
+}
+
 async function run() {
   await init();
   game = new Game();
   setup3D();
+  qualityMode = readSavedQuality();
+  setQualityMode(qualityMode);
   if (vsComputer) {
     assignRandomVsComputerRoles();
   } else {
     humanPlayerCell = Cell.X;
     aiPlayerCell = Cell.O;
   }
+  resetScenePieces();
   renderBoardState();
   refreshModeChip();
   refreshModeButton();
+  refreshScoreChip();
+  refreshQualityButton();
   if (vsComputer && game.current_player() === aiPlayerCell) {
     playComputerTurn();
   }
