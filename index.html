@@ -16,13 +16,19 @@
   </head>
   <body>
     <main class="game-shell">
-      <div class="title-row">
-        <h1>Tic Tac Toe</h1>
-        <span class="pill">WebGL</span>
+      <header class="game-header">
+        <div class="title-row">
+          <h1>Tic Tac Toe</h1>
+          <span class="pill">WebGL</span>
+        </div>
+        <p id="status" class="status"></p>
+        <p id="mode" class="mode-chip">Mode: Smart AI</p>
+      </header>
+      <div class="button-row">
+        <button id="mode-toggle" type="button">Play 1v1</button>
+        <button id="reset" type="button">Reset game</button>
       </div>
-      <p id="status" class="status"></p>
       <section class="viewport" id="viewport" aria-label="3D board"></section>
-      <button id="reset">Reset game</button>
     </main>
 
     <script type="module" src="./main.js"></script>

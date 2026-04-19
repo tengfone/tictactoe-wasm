@@ -7,6 +7,8 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
 const statusEl = document.getElementById("status");
+const modeToggle = document.getElementById("mode-toggle");
+const modeChip = document.getElementById("mode");
 const resetButton = document.getElementById("reset");
 const viewport = document.getElementById("viewport");
 
@@ -85,6 +87,28 @@ let hoveredCell = null;
 let ghostPiece = null;
 let winBeam = null;
 let winBeamProgress = 0;
+let vsComputer = true;
+let aiThinking = false;
+let aiMoveToken = 0;
+
+const PLAYER_HUMAN = Cell.X;
+const PLAYER_AI = Cell.O;
+
+function refreshModeChip() {
+  if (!modeChip) {
+    return;
+  }
+
+  modeChip.textContent = vsComputer ? "Mode: Smart AI" : "Mode: Human vs Human";
+}
+
+function refreshModeButton() {
+  if (!modeToggle) {
+    return;
+  }
+
+  modeToggle.textContent = vsComputer ? "Play 1v1" : "Play vs Computer";
+}
 
 function tryHaptic(pattern) {
   if (navigator.vibrate) {
@@ -151,7 +175,9 @@ function updateStatus() {
     return;
   }
 
-  statusEl.textContent = `Current player: ${labels[game.current_player()]}`;
+  const current = game.current_player() === PLAYER_HUMAN ? "You" : "Computer";
+  const turn = vsComputer ? `Turn: ${current}` : `Turn: ${labels[game.current_player()]}`;
+  statusEl.textContent = turn;
 }
 
 function buildCellGeometry() {
@@ -234,6 +260,148 @@ function calculateWinningLine() {
   return null;
 }
 
+function boardFromGame() {
+  const board = [];
+  for (let i = 0; i < 9; i++) {
+    board.push(game.get_cell(i));
+  }
+  return board;
+}
+
+function boardWinner(board) {
+  for (const [a, b, c] of WIN_LINES) {
+    const aVal = board[a];
+    if (aVal !== Cell.Empty && aVal === board[b] && aVal === board[c]) {
+      return aVal;
+    }
+  }
+
+  return Cell.Empty;
+}
+
+function boardMoves(board) {
+  const moves = [];
+  for (let i = 0; i < board.length; i++) {
+    if (board[i] === Cell.Empty) {
+      moves.push(i);
+    }
+  }
+  return moves;
+}
+
+function evaluateBoard(board, depth) {
+  const winner = boardWinner(board);
+
+  if (winner === PLAYER_AI) {
+    return 1000 - depth;
+  }
+
+  if (winner === PLAYER_HUMAN) {
+    return -1000 + depth;
+  }
+
+  if (boardMoves(board).length === 0) {
+    return 0;
+  }
+
+  return null;
+}
+
+function minimax(board, depth, player) {
+  const score = evaluateBoard(board, depth);
+  if (score !== null) {
+    return score;
+  }
+
+  const moves = boardMoves(board);
+  const maximizing = player === PLAYER_AI;
+  let bestScore = maximizing ? -Infinity : Infinity;
+  const nextPlayer = player === PLAYER_HUMAN ? PLAYER_AI : PLAYER_HUMAN;
+
+  for (const move of moves) {
+    board[move] = player;
+    const childScore = minimax(board, depth + 1, nextPlayer);
+    board[move] = Cell.Empty;
+
+    if (maximizing) {
+      bestScore = Math.max(bestScore, childScore);
+      if (bestScore >= 1000 - depth) {
+        return bestScore;
+      }
+    } else {
+      bestScore = Math.min(bestScore, childScore);
+      if (bestScore <= -1000 + depth) {
+        return bestScore;
+      }
+    }
+  }
+
+  return bestScore;
+}
+
+function chooseSmartMove() {
+  const board = boardFromGame();
+  let bestMove = -1;
+  let bestScore = -Infinity;
+
+  const moves = boardMoves(board);
+  if (moves.length === 0) {
+    return -1;
+  }
+
+  for (const move of moves) {
+    board[move] = PLAYER_AI;
+    const score = minimax(board, 1, PLAYER_HUMAN);
+    board[move] = Cell.Empty;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestMove = move;
+    }
+  }
+
+  return bestMove;
+}
+
+function playComputerTurn() {
+  if (!vsComputer) {
+    return;
+  }
+
+  if (game.winner() !== Cell.Empty || game.is_draw() || game.current_player() !== PLAYER_AI) {
+    return;
+  }
+
+  if (aiThinking) {
+    return;
+  }
+
+  aiThinking = true;
+  const token = ++aiMoveToken;
+  const move = chooseSmartMove();
+  statusEl.textContent = "Computer is thinking…";
+
+  setTimeout(() => {
+    if (token !== aiMoveToken) {
+      aiThinking = false;
+      return;
+    }
+
+    if (game.winner() !== Cell.Empty || game.is_draw() || game.current_player() !== PLAYER_AI) {
+      aiThinking = false;
+      return;
+    }
+
+    if (move >= 0 && game.play(move)) {
+      renderBoardState();
+      updateGhost();
+    }
+
+    aiThinking = false;
+    updateStatus();
+  }, 240);
+}
+
 function showWinBeam(line) {
   if (!line) {
     return;
@@ -246,13 +414,16 @@ function showWinBeam(line) {
 
   const direction = end.clone().sub(start);
   const fullLength = direction.length();
-
   winBeam = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.08, 0.08, 1, 16),
-    new THREE.MeshBasicMaterial({
+    new THREE.BoxGeometry(0.22, fullLength, 0.22),
+    new THREE.MeshStandardMaterial({
       color: winner === Cell.X ? 0x57b3ff : 0xff6f91,
+      emissive: winner === Cell.X ? 0x204e80 : 0x53203a,
+      emissiveIntensity: 0.74,
       transparent: true,
       opacity: 0.95,
+      metalness: 0.35,
+      roughness: 0.26,
     })
   );
 
@@ -260,6 +431,7 @@ function showWinBeam(line) {
   winBeam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
   winBeam.scale.set(1, 0.001, 1);
   winBeam.userData.fullLength = fullLength;
+  winBeam.renderOrder = 2;
   scene.add(winBeam);
   winBeamProgress = 0;
 }
@@ -445,6 +617,10 @@ function onPointerMove(event) {
 }
 
 function onClick(event) {
+  if (aiThinking || (vsComputer && game.current_player() !== PLAYER_HUMAN)) {
+    return;
+  }
+
   const picked = pickCell(event);
   if (!picked) {
     return;
@@ -454,6 +630,7 @@ function onClick(event) {
   if (game.play(index)) {
     renderBoardState();
     updateGhost();
+    playComputerTurn();
   }
 }
 
@@ -515,13 +692,12 @@ function animate(now) {
   camera.position.lerp(cameraTarget, 0.05);
   camera.lookAt(0, 0, 0);
 
-  boardGroup.rotation.y += 0.0014;
   composer.render();
 }
 
 function onResize() {
   const width = viewport.clientWidth;
-  const height = Math.max(360, viewport.clientHeight);
+  const height = Math.max(260, viewport.clientHeight);
 
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
@@ -641,21 +817,48 @@ function setup3D() {
   requestAnimationFrame(animate);
 }
 
+if (modeToggle) {
+  modeToggle.addEventListener("click", () => {
+    vsComputer = !vsComputer;
+    aiMoveToken += 1;
+    aiThinking = false;
+
+    refreshModeChip();
+    refreshModeButton();
+    renderBoardState();
+
+    if (vsComputer && game.current_player() === PLAYER_AI && !game.winner() && !game.is_draw()) {
+      playComputerTurn();
+    }
+  });
+}
+
 async function run() {
   await init();
   game = new Game();
   setup3D();
   renderBoardState();
+  refreshModeChip();
+  refreshModeButton();
+  if (vsComputer && game.current_player() === PLAYER_AI) {
+    playComputerTurn();
+  }
 
   setTimeout(() => {
     cameraTarget.copy(cameraAnchors.neutral);
   }, 260);
 
   resetButton.addEventListener("click", () => {
+    aiMoveToken += 1;
+    aiThinking = false;
     game.reset();
     resetScenePieces();
     cameraTarget.copy(cameraAnchors.neutral);
     renderBoardState();
+
+    if (vsComputer && game.current_player() === PLAYER_AI) {
+      playComputerTurn();
+    }
   });
 }
 
