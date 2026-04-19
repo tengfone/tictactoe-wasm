@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tic Tac Toe (Rust + WASM + WebGL)</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="game-shell">
+      <div class="title-row">
+        <h1>Tic Tac Toe</h1>
+        <span class="pill">WebGL</span>
+      </div>
+      <p id="status" class="status"></p>
+      <section class="viewport" id="viewport" aria-label="3D board"></section>
+      <button id="reset">Reset game</button>
+    </main>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
