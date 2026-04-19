@@ -25,7 +25,7 @@
             <span class="brand-mark" aria-hidden="true"></span>
             <div>
               <h1>Tic Tac Toe</h1>
-              <p>Neon board duel</p>
+              <p>Minimal board</p>
             </div>
           </div>
           <div class="info-strip">
@@ -37,15 +37,20 @@
           <p id="status" class="status">Loading board...</p>
           <p id="move-log" class="move-log">Moves: none</p>
         </aside>
-        <div class="button-row" aria-label="Game controls">
+        <div class="quick-actions" aria-label="Primary game controls">
           <button id="mode-toggle" type="button">Play 1v1</button>
+          <button id="reset" type="button">Reset game</button>
+        </div>
+        <details class="settings-panel">
+          <summary>Options</summary>
+          <div class="button-row" aria-label="Game options">
           <button id="quality-toggle" type="button">Quality: Balanced</button>
           <button id="difficulty-toggle" type="button">AI: Easy</button>
           <button id="sound-toggle" type="button">Sound: On</button>
           <button id="replay-button" type="button">Replay Last</button>
           <button id="reset-score" type="button">Reset scores</button>
-          <button id="reset" type="button">Reset game</button>
-        </div>
+          </div>
+        </details>
       </section>
     </main>
 

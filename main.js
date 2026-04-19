@@ -1,10 +1,98 @@
-import init, { Cell, Game } from "./pkg/tic_tac_toe_wasm.js";
 import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+
+const Cell = Object.freeze({
+  Empty: 0,
+  X: 1,
+  O: 2,
+});
+
+class FallbackGame {
+  constructor() {
+    this.reset();
+  }
+
+  reset() {
+    this.board = Array(9).fill(Cell.Empty);
+    this.current = Cell.X;
+    this.gameWinner = Cell.Empty;
+    this.draw = false;
+  }
+
+  current_player() {
+    return this.current;
+  }
+
+  winner() {
+    return this.gameWinner;
+  }
+
+  is_draw() {
+    return this.draw;
+  }
+
+  get_cell(index) {
+    return this.board[index];
+  }
+
+  play(index) {
+    if (
+      index < 0 ||
+      index >= this.board.length ||
+      this.gameWinner !== Cell.Empty ||
+      this.draw ||
+      this.board[index] !== Cell.Empty
+    ) {
+      return false;
+    }
+
+    this.board[index] = this.current;
+    const winner = this.calculateWinner();
+    if (winner !== Cell.Empty) {
+      this.gameWinner = winner;
+      return true;
+    }
+
+    if (this.board.every((cell) => cell !== Cell.Empty)) {
+      this.draw = true;
+      return true;
+    }
+
+    this.current = this.current === Cell.X ? Cell.O : Cell.X;
+    return true;
+  }
+
+  calculateWinner() {
+    for (const [a, b, c] of WIN_LINES) {
+      if (
+        this.board[a] !== Cell.Empty &&
+        this.board[a] === this.board[b] &&
+        this.board[b] === this.board[c]
+      ) {
+        return this.board[a];
+      }
+    }
+
+    return Cell.Empty;
+  }
+}
+
+let Game = FallbackGame;
+
+async function loadGameRuntime() {
+  try {
+    const wasm = await import("./pkg/tic_tac_toe_wasm.js");
+    await wasm.default();
+    Game = wasm.Game;
+  } catch (error) {
+    console.warn("WASM package unavailable; using JS game runtime fallback.", error);
+    Game = FallbackGame;
+  }
+}
 
 const statusEl = document.getElementById("status");
 const modeToggle = document.getElementById("mode-toggle");
@@ -53,35 +141,35 @@ const QUALITY_PRESETS = {
   performance: {
     label: "Performance",
     maxPixelRatio: 1,
-    toneExposure: 0.96,
+    toneExposure: 0.9,
     toneMapping: THREE.ACESFilmicToneMapping,
-    bloom: { strength: 0.22, radius: 0.34, threshold: 0.92 },
-    vignette: { offset: 1.0, darkness: 1.0 },
+    bloom: { strength: 0, radius: 0, threshold: 1 },
+    vignette: { offset: 1.06, darkness: 0.96 },
     shadows: false,
-    lights: { key: 1.85, fill: 0.22, rim: 0.16, ambient: 0.42 },
-    confettiScale: 0.4,
+    lights: { key: 1.55, fill: 0.12, rim: 0.04, ambient: 0.52 },
+    confettiScale: 0,
   },
   balanced: {
     label: "Balanced",
     maxPixelRatio: 1.4,
-    toneExposure: 1.0,
+    toneExposure: 0.92,
     toneMapping: THREE.ACESFilmicToneMapping,
-    bloom: { strength: 0.46, radius: 0.48, threshold: 0.84 },
-    vignette: { offset: 0.98, darkness: 1.08 },
+    bloom: { strength: 0.04, radius: 0.18, threshold: 0.94 },
+    vignette: { offset: 1.04, darkness: 0.98 },
     shadows: true,
-    lights: { key: 2.05, fill: 0.34, rim: 0.2, ambient: 0.52 },
-    confettiScale: 0.72,
+    lights: { key: 1.7, fill: 0.16, rim: 0.06, ambient: 0.58 },
+    confettiScale: 0,
   },
   cinematic: {
     label: "Cinematic",
     maxPixelRatio: 1.6,
-    toneExposure: 1.04,
+    toneExposure: 0.96,
     toneMapping: THREE.ACESFilmicToneMapping,
-    bloom: { strength: 0.54, radius: 0.56, threshold: 0.76 },
-    vignette: { offset: 0.98, darkness: 1.06 },
+    bloom: { strength: 0.08, radius: 0.24, threshold: 0.9 },
+    vignette: { offset: 1.02, darkness: 1.0 },
     shadows: true,
-    lights: { key: 2.35, fill: 0.48, rim: 0.24, ambient: 0.58 },
-    confettiScale: 1,
+    lights: { key: 1.85, fill: 0.18, rim: 0.08, ambient: 0.62 },
+    confettiScale: 0,
   },
 };
 
@@ -824,17 +912,17 @@ function buildCellGeometry() {
   const hoverRing = new THREE.Mesh(
     new THREE.RingGeometry(0.82, 1.06, 48),
     new THREE.MeshStandardMaterial({
-      color: 0x78ffe4,
+      color: 0xf4f1e8,
       transparent: true,
       opacity: 0,
-      emissive: 0x1d8a78,
-      emissiveIntensity: 1.4,
+      emissive: 0x25231d,
+      emissiveIntensity: 0.25,
       side: THREE.DoubleSide,
       depthWrite: false,
     })
   );
   hoverRing.rotation.x = -Math.PI / 2;
-  hoverRing.position.y = 0.11;
+  hoverRing.position.y = 0.15;
   hoverRing.renderOrder = 2;
 
   mesh.add(hoverRing);
@@ -867,24 +955,24 @@ function buildOPiece(material = pbrMaterialO) {
 
 function buildGhostPiece() {
   const ghostMatX = new THREE.MeshPhysicalMaterial({
-    color: 0x8cecff,
+    color: 0xf4f1e8,
     transparent: true,
-    opacity: 0.28,
-    metalness: 0.72,
-    roughness: 0.32,
-    envMapIntensity: 1.4,
-    emissive: 0x1c6f76,
-    emissiveIntensity: 0.35,
+    opacity: 0.22,
+    metalness: 0.04,
+    roughness: 0.58,
+    envMapIntensity: 0.7,
+    emissive: 0x25231d,
+    emissiveIntensity: 0.12,
   });
   const ghostMatO = new THREE.MeshPhysicalMaterial({
-    color: 0xffd48b,
+    color: 0xc8b37a,
     transparent: true,
-    opacity: 0.28,
-    metalness: 0.7,
-    roughness: 0.33,
-    envMapIntensity: 1.4,
-    emissive: 0x684311,
-    emissiveIntensity: 0.28,
+    opacity: 0.22,
+    metalness: 0.04,
+    roughness: 0.58,
+    envMapIntensity: 0.7,
+    emissive: 0x332817,
+    emissiveIntensity: 0.12,
   });
 
   const x = buildXPiece(ghostMatX);
@@ -1120,23 +1208,22 @@ function showWinBeam(line) {
   const direction = end.clone().sub(start);
   const fullLength = direction.length();
   winBeam = new THREE.Mesh(
-    new THREE.BoxGeometry(0.22, fullLength, 0.22),
+    new THREE.BoxGeometry(0.16, 0.12, fullLength),
     new THREE.MeshStandardMaterial({
-      color: winner === Cell.X ? 0x56d9ff : 0xffbf62,
-      emissive: winner === Cell.X ? 0x164f62 : 0x624113,
-      emissiveIntensity: 0.74,
+      color: winner === Cell.X ? 0xf4f1e8 : 0xc8b37a,
+      emissive: winner === Cell.X ? 0x2a2924 : 0x3b3017,
+      emissiveIntensity: 0.14,
       transparent: true,
       opacity: 0.95,
-      metalness: 0.35,
-      roughness: 0.26,
+      metalness: 0.08,
+      roughness: 0.72,
     })
   );
 
-  winBeam.position.set(midpoint.x, 0.52, midpoint.z);
+  winBeam.position.set(midpoint.x, 0.46, midpoint.z);
   const flatDirection = new THREE.Vector3(direction.x, 0, direction.z).normalize();
   winBeam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), flatDirection);
-  winBeam.scale.set(1, 0.001, 1);
-  winBeam.userData.fullLength = fullLength;
+  winBeam.scale.set(1, 1, 0.001);
   winBeam.renderOrder = 2;
   scene.add(winBeam);
   winBeamProgress = 0;
@@ -1144,6 +1231,10 @@ function showWinBeam(line) {
 
 function spawnConfetti(color, center) {
   const preset = QUALITY_PRESETS[qualityMode];
+  if (preset.confettiScale <= 0) {
+    return;
+  }
+
   const count = Math.max(12, Math.round(140 * preset.confettiScale));
   const positions = new Float32Array(count * 3);
   const velocities = [];
@@ -1189,10 +1280,16 @@ function addPiece(index, cell) {
   }
 
   const pos = boardToWorld(index);
-  piece.position.set(pos.x, 0.28, pos.z);
+  piece.position.set(pos.x, cell === Cell.O ? 0.38 : 0.28, pos.z);
   piece.scale.setScalar(0.001);
   boardGroup.add(piece);
-  piece.rotation.x = (Math.random() - 0.5) * 0.06;
+
+  if (cell === Cell.O) {
+    piece.rotation.x = Math.PI / 2;
+  } else {
+    piece.rotation.x = (Math.random() - 0.5) * 0.04;
+  }
+
   piece.rotation.z = (Math.random() - 0.5) * 0.08;
   piece.userData.player = cell;
   pieces.push({ piece, bornAt: performance.now() });
@@ -1241,7 +1338,7 @@ function updateHoverVisuals() {
     const hoverRing = cell.userData.hoverRing;
 
     if (!playable) {
-      cell.material.color.setHex(0x0c1715);
+      cell.material.color.setHex(0x11110f);
       if (hoverRing) {
         hoverRing.material.opacity = 0;
         hoverRing.scale.setScalar(1);
@@ -1252,12 +1349,12 @@ function updateHoverVisuals() {
     }
 
     const isHovered = hoveredCell === cell;
-    cell.material.color.setHex(isHovered ? 0x1f5a50 : 0x18302c);
+    cell.material.color.setHex(isHovered ? 0x24231f : 0x181815);
     cell.position.y = THREE.MathUtils.lerp(cell.position.y, isHovered ? 0.08 : 0, 0.18);
     if (hoverRing) {
-      hoverRing.material.opacity = isHovered ? 0.96 : 0.12;
+      hoverRing.material.opacity = isHovered ? 0.72 : 0;
       hoverRing.scale.setScalar(isHovered ? 1.08 : 0.92);
-      hoverRing.material.color.setHex(isHovered ? 0x91ffe8 : 0x42cbb4);
+      hoverRing.material.color.setHex(isHovered ? 0xf4f1e8 : 0xc8b37a);
     }
   }
 }
@@ -1276,7 +1373,7 @@ function renderBoardState() {
   const winner = game.winner();
   if (winner !== Cell.Empty && !scene.userData.winnerCelebrated) {
     recordScore();
-    const winnerColor = winner === Cell.X ? 0x56d9ff : 0xffbf62;
+    const winnerColor = winner === Cell.X ? 0xf4f1e8 : 0xc8b37a;
     spawnConfetti(winnerColor, new THREE.Vector3(0, 0.4, 0));
     showWinBeam(calculateWinningLine());
     playWinSfx();
@@ -1420,8 +1517,8 @@ function animateWinBeam() {
   }
 
   winBeamProgress = Math.min(1, winBeamProgress + 0.045);
-  winBeam.scale.y = THREE.MathUtils.lerp(0.001, winBeam.userData.fullLength, winBeamProgress);
-  winBeam.material.opacity = 0.35 + 0.6 * Math.sin(winBeamProgress * Math.PI);
+  winBeam.scale.z = THREE.MathUtils.lerp(0.001, 1, winBeamProgress);
+  winBeam.material.opacity = 0.2 + 0.75 * Math.sin(winBeamProgress * Math.PI);
 }
 
 let prevTime = performance.now();
@@ -1451,9 +1548,8 @@ function animate(now) {
   updateGhost();
   animateWinBeam();
 
-  const boardDrift = qualityMode === "performance" ? 0.0005 : 0.0015;
-  boardGroup.rotation.y = Math.sin(now * boardDrift) * 0.01;
-  boardGroup.rotation.z = Math.cos(now * (boardDrift * 0.7)) * 0.004;
+  boardGroup.rotation.y = 0;
+  boardGroup.rotation.z = 0;
 
   if (ambientGlow) {
     const glowPulse = 0.52 + 0.08 * Math.sin(now * 0.0011);
@@ -1488,7 +1584,7 @@ function onResize() {
 
 function setup3D() {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x04100d);
+  scene.background = new THREE.Color(0x090908);
   scene.userData.winnerCelebrated = false;
   scene.userData.drawCelebrated = false;
 
@@ -1528,23 +1624,23 @@ function setup3D() {
   keyLight.castShadow = true;
   scene.add(keyLight);
 
-  fillLight = new THREE.PointLight(0x56d9ff, 0.5, 24, 1.6);
+  fillLight = new THREE.PointLight(0xf4f1e8, 0.5, 24, 1.6);
   fillLight.position.set(-5.2, 3.8, -4.2);
   scene.add(fillLight);
 
-  rimLight = new THREE.PointLight(0xffbf62, 0.18, 20, 1.5);
+  rimLight = new THREE.PointLight(0xc8b37a, 0.18, 20, 1.5);
   rimLight.position.set(0, 7, -8.5);
   scene.add(rimLight);
 
-  ambientLight = new THREE.AmbientLight(0xb5ffe2, 0.5);
+  ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambientLight);
 
   ambientGlow = new THREE.Mesh(
     new THREE.RingGeometry(2.8, 6.8, 72),
     new THREE.MeshBasicMaterial({
-      color: 0x46f0c2,
+      color: 0xf4f1e8,
       transparent: true,
-      opacity: 0.28,
+      opacity: 0.04,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
       depthWrite: false,
@@ -1553,6 +1649,7 @@ function setup3D() {
   ambientGlow.rotation.x = -Math.PI / 2;
   ambientGlow.position.y = 0.03;
   scene.add(ambientGlow);
+  ambientGlow.visible = false;
 
   const starCount = qualityMode === "performance" ? 180 : 300;
   const starPositions = new Float32Array(starCount * 3);
@@ -1579,41 +1676,42 @@ function setup3D() {
     })
   );
   scene.add(starField);
+  starField.visible = false;
 
   baseCellMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x18302c,
-    metalness: 0.32,
-    roughness: 0.47,
-    clearcoat: 0.58,
-    clearcoatRoughness: 0.2,
-    envMapIntensity: 1.2,
+    color: 0x181815,
+    metalness: 0.02,
+    roughness: 0.82,
+    clearcoat: 0.18,
+    clearcoatRoughness: 0.45,
+    envMapIntensity: 0.55,
   });
 
   pbrMaterialX = new THREE.MeshPhysicalMaterial({
-    color: 0x56d9ff,
-    metalness: 0.82,
-    roughness: 0.24,
-    clearcoat: 1,
-    clearcoatRoughness: 0.13,
-    envMapIntensity: 1.6,
+    color: 0xf4f1e8,
+    metalness: 0.04,
+    roughness: 0.5,
+    clearcoat: 0.25,
+    clearcoatRoughness: 0.4,
+    envMapIntensity: 0.75,
   });
 
   pbrMaterialO = new THREE.MeshPhysicalMaterial({
-    color: 0xffbf62,
-    metalness: 0.78,
-    roughness: 0.28,
-    clearcoat: 1,
-    clearcoatRoughness: 0.1,
-    envMapIntensity: 1.6,
+    color: 0xc8b37a,
+    metalness: 0.04,
+    roughness: 0.54,
+    clearcoat: 0.22,
+    clearcoatRoughness: 0.42,
+    envMapIntensity: 0.72,
   });
 
   const floor = new THREE.Mesh(
     new THREE.CylinderGeometry(8, 8.5, 0.4, 50),
     new THREE.MeshPhysicalMaterial({
-      color: 0x091511,
-      metalness: 0.45,
-      roughness: 0.63,
-      envMapIntensity: 1.2,
+      color: 0x0d0d0b,
+      metalness: 0.02,
+      roughness: 0.88,
+      envMapIntensity: 0.45,
     })
   );
   floor.position.y = -0.35;
@@ -1725,7 +1823,7 @@ if (resetScoreButton) {
 }
 
 async function run() {
-  await init();
+  await loadGameRuntime();
   game = new Game();
   setup3D();
 
