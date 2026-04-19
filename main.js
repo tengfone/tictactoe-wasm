@@ -13,9 +13,21 @@ const scoreEl = document.getElementById("score");
 const resetButton = document.getElementById("reset");
 const viewport = document.getElementById("viewport");
 const qualityToggle = document.getElementById("quality-toggle");
+const difficultyToggle = document.getElementById("difficulty-toggle");
+const soundToggle = document.getElementById("sound-toggle");
+const replayButton = document.getElementById("replay-button");
+const resetScoreButton = document.getElementById("reset-score");
+const moveLogEl = document.getElementById("move-log");
 
 const scoreKey = "ttt-wasm-score-v2";
 const qualityKey = "ttt-wasm-quality-v1";
+const settingsKey = "ttt-wasm-settings-v1";
+const matchKey = "ttt-wasm-last-match-v1";
+const SETTINGS_TEMPLATE = {
+  soundEnabled: true,
+  aiDifficulty: "smart",
+  quality: "cinematic",
+};
 const SCORE_TEMPLATE = {
   vsComputer: { you: 0, ai: 0, draw: 0 },
   vsHuman: { x: 0, o: 0, draw: 0 },
@@ -26,6 +38,17 @@ const baseScoreTemplate = () => ({
 });
 
 const QUALITY_MODES = ["performance", "balanced", "cinematic"];
+const DIFFICULTY_MODES = ["easy", "smart", "master"];
+const AI_DIFFICULTY_LABELS = {
+  easy: "Easy",
+  smart: "Smart",
+  master: "Master",
+};
+const DIFFICULTY_KEY_MAP = {
+  easy: 0.22,
+  smart: 0.5,
+  master: 1,
+};
 const QUALITY_PRESETS = {
   performance: {
     label: "Performance",
@@ -60,6 +83,12 @@ const QUALITY_PRESETS = {
     lights: { key: 2.35, fill: 0.48, rim: 0.24, ambient: 0.58 },
     confettiScale: 1,
   },
+};
+
+const CELL_LABELS = {
+  [Cell.Empty]: "Empty",
+  [Cell.X]: "X",
+  [Cell.O]: "O",
 };
 
 const labels = {
@@ -144,12 +173,21 @@ let humanPlayerCell = Cell.X;
 let aiPlayerCell = Cell.O;
 let scoreState = loadScoreState();
 let qualityMode = "cinematic";
+let aiDifficulty = "smart";
+let soundEnabled = true;
+let moveHistory = [];
 let bloomPass;
 let vignettePass;
 let keyLight;
 let fillLight;
 let rimLight;
 let ambientLight;
+let ambientGlow;
+let starField;
+let replayHandle = null;
+let replayedMoves = [];
+let replayIndex = 0;
+let isReplaying = false;
 let statusPulseTimer = null;
 
 function refreshModeChip() {
@@ -158,11 +196,219 @@ function refreshModeChip() {
   }
 
   if (vsComputer) {
-    modeChip.textContent = `Mode: Smart AI (${humanPlayerCell === Cell.X ? "You are X" : "You are O"})`;
+    modeChip.textContent = `Mode: ${AI_DIFFICULTY_LABELS[aiDifficulty]} AI (${humanPlayerCell === Cell.X ? "You are X" : "You are O"})`;
     return;
   }
 
   modeChip.textContent = "Mode: Human vs Human";
+}
+
+function formatCellReference(index) {
+  const row = Math.floor(index / 3);
+  const col = index % 3;
+  return `R${row + 1}C${col + 1}`;
+}
+
+function appendMoveHistory(index, playerCell, playerAlias) {
+  moveHistory.push({
+    index,
+    playerCell,
+    playerAlias: playerAlias || (playerCell === Cell.X ? "X" : "O"),
+    at: performance.now(),
+    move: moveHistory.length + 1,
+  });
+  updateMoveLog();
+}
+
+function updateMoveLog(steps = moveHistory) {
+  if (!moveLogEl) {
+    return;
+  }
+
+  if (!steps.length) {
+    moveLogEl.textContent = "Moves: none";
+    return;
+  }
+
+  const labelsByMode = steps.map((entry, i) => {
+    const alias = vsComputer && entry.playerAlias
+      ? entry.playerAlias
+      : (entry.playerCell === humanPlayerCell ? "You" : (vsComputer ? "AI" : CELL_LABELS[entry.playerCell] || "X"));
+    return `${i + 1}. ${alias} → ${formatCellReference(entry.index)}`;
+  });
+
+  moveLogEl.textContent = `Moves: ${labelsByMode.join(" · ")}`;
+}
+
+function resetMoveLog() {
+  moveHistory = [];
+  updateMoveLog();
+}
+
+function parseReplayMove(entry) {
+  const playerCell = entry?.playerCell;
+  const index = Number(entry?.index);
+  if (!Number.isInteger(index)) {
+    return null;
+  }
+
+  if (playerCell !== Cell.X && playerCell !== Cell.O) {
+    return null;
+  }
+
+  return { index, playerCell };
+}
+
+function saveLastMatch() {
+  if (!window.localStorage) {
+    return;
+  }
+
+  const isFinished = game.winner() !== Cell.Empty || game.is_draw();
+  if (!isFinished) {
+    return;
+  }
+
+  const payload = {
+    vsComputer,
+    moves: moveHistory.map((entry) => ({
+      index: entry.index,
+      playerCell: entry.playerCell,
+      playerAlias: entry.playerAlias,
+    })),
+    winner: game.winner(),
+    startedAt: moveHistory[0]?.at || Date.now(),
+    endedAt: Date.now(),
+    humanPlayerCell,
+    aiPlayerCell,
+    aiDifficulty,
+  };
+
+  try {
+    window.localStorage.setItem(matchKey, JSON.stringify(payload));
+  } catch (error) {
+    console.warn("Unable to persist last match:", error);
+  }
+}
+
+function loadLastMatch() {
+  if (!window.localStorage) {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(matchKey);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+
+    if (!Array.isArray(parsed.moves) || parsed.moves.length === 0) {
+      return null;
+    }
+
+    const normalizedMoves = [];
+    for (const move of parsed.moves) {
+      const parsedMove = parseReplayMove(move);
+      if (parsedMove) {
+        normalizedMoves.push(parsedMove);
+      }
+    }
+
+    if (normalizedMoves.length === 0) {
+      return null;
+    }
+
+    return {
+      moves: normalizedMoves,
+      winner: parsed.winner === Cell.X || parsed.winner === Cell.O ? parsed.winner : Cell.Empty,
+      vsComputer: parsed.vsComputer === true,
+      humanPlayerCell: parsed.humanPlayerCell === Cell.X || parsed.humanPlayerCell === Cell.O ? parsed.humanPlayerCell : Cell.X,
+      aiPlayerCell: parsed.aiPlayerCell === Cell.X || parsed.aiPlayerCell === Cell.O ? parsed.aiPlayerCell : Cell.O,
+      aiDifficulty: DIFFICULTY_MODES.includes(parsed.aiDifficulty) ? parsed.aiDifficulty : "smart",
+    };
+  } catch (error) {
+    console.warn("Unable to load last match:", error);
+    return null;
+  }
+}
+
+function stopReplay() {
+  if (replayHandle) {
+    window.clearInterval(replayHandle);
+    replayHandle = null;
+  }
+
+  isReplaying = false;
+  replayedMoves = [];
+  replayIndex = 0;
+  refreshReplayButton();
+}
+
+function startReplay() {
+  const match = loadLastMatch();
+  if (!match) {
+    statusEl.textContent = "No replay available yet";
+    return;
+  }
+
+  isReplaying = true;
+  replayedMoves = match.moves;
+  replayIndex = 0;
+  replayedMoves = replayedMoves.slice(0, 9);
+  moveHistory = [];
+  updateMoveLog([]);
+
+  aiThinking = false;
+  aiMoveToken += 1;
+  game.reset();
+  vsComputer = match.vsComputer;
+  humanPlayerCell = match.humanPlayerCell || Cell.X;
+  aiPlayerCell = match.aiPlayerCell || Cell.O;
+  aiDifficulty = match.aiDifficulty || "smart";
+  resetScenePieces();
+  renderBoardState();
+  refreshModeChip();
+  refreshDifficultyButton();
+  refreshQualityButton();
+  refreshReplayButton();
+
+  const replaySpeed = qualityMode === "performance" ? 420 : 580;
+  statusEl.textContent = "Replaying last match…";
+  replayHandle = window.setInterval(() => {
+    if (!isReplaying) {
+      stopReplay();
+      return;
+    }
+
+    const next = replayedMoves[replayIndex];
+    if (!next) {
+      stopReplay();
+      statusEl.textContent = "Replay complete.";
+      return;
+    }
+
+    const moved = game.play(next.index);
+    if (moved) {
+      const playerAlias = vsComputer
+        ? next.playerCell === humanPlayerCell
+          ? "You"
+          : "AI"
+        : CELL_LABELS[next.playerCell] || "X";
+      appendMoveHistory(next.index, next.playerCell, playerAlias);
+      renderBoardState();
+      replayIndex += 1;
+    }
+
+    if (replayIndex >= replayedMoves.length) {
+      stopReplay();
+      return;
+    }
+  }, replaySpeed);
 }
 
 function refreshModeButton() {
@@ -237,6 +483,66 @@ function saveScoreState() {
   }
 }
 
+function readSavedSettings() {
+  if (!window.localStorage) {
+    return { ...SETTINGS_TEMPLATE };
+  }
+
+  try {
+    const raw = window.localStorage.getItem(settingsKey);
+    if (!raw) {
+      const legacyQuality = readSavedQuality();
+      return {
+        soundEnabled: SETTINGS_TEMPLATE.soundEnabled,
+        aiDifficulty: SETTINGS_TEMPLATE.aiDifficulty,
+        quality: QUALITY_MODES.includes(legacyQuality) ? legacyQuality : SETTINGS_TEMPLATE.quality,
+      };
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return { ...SETTINGS_TEMPLATE };
+    }
+
+    const value = (key) => {
+      const candidate = parsed[key];
+      return candidate === undefined ? SETTINGS_TEMPLATE[key] : candidate;
+    };
+
+    return {
+      soundEnabled: Boolean(value("soundEnabled")),
+      aiDifficulty: DIFFICULTY_MODES.includes(value("aiDifficulty")) ? value("aiDifficulty") : SETTINGS_TEMPLATE.aiDifficulty,
+      quality: QUALITY_MODES.includes(value("quality")) ? value("quality") : SETTINGS_TEMPLATE.quality,
+    };
+  } catch (error) {
+    console.warn("Unable to read settings:", error);
+    return { ...SETTINGS_TEMPLATE };
+  }
+}
+
+function saveSettings() {
+  if (!window.localStorage) {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      qualityKey,
+      qualityMode
+    );
+    window.localStorage.setItem(
+      settingsKey,
+      JSON.stringify({
+        soundEnabled,
+        aiDifficulty,
+        quality: qualityMode,
+      })
+    );
+  } catch (error) {
+    console.warn("Unable to persist settings:", error);
+  }
+}
+
 function refreshQualityButton() {
   if (!qualityToggle) {
     return;
@@ -244,6 +550,30 @@ function refreshQualityButton() {
 
   const preset = QUALITY_PRESETS[qualityMode];
   qualityToggle.textContent = `Quality: ${preset.label}`;
+}
+
+function refreshDifficultyButton() {
+  if (!difficultyToggle) {
+    return;
+  }
+
+  difficultyToggle.textContent = `AI: ${AI_DIFFICULTY_LABELS[aiDifficulty]}`;
+}
+
+function refreshSoundButton() {
+  if (!soundToggle) {
+    return;
+  }
+
+  soundToggle.textContent = `Sound: ${soundEnabled ? "On" : "Off"}`;
+}
+
+function refreshReplayButton() {
+  if (!replayButton) {
+    return;
+  }
+
+  replayButton.textContent = isReplaying ? "Stop Replay" : "Replay Last";
 }
 
 function readSavedQuality() {
@@ -298,20 +628,28 @@ function setQualityMode(nextMode) {
   qualityMode = nextMode;
   applyQualityMode();
   refreshQualityButton();
-
-  if (window.localStorage) {
-    try {
-      window.localStorage.setItem(qualityKey, qualityMode);
-    } catch (error) {
-      console.warn("Unable to persist quality mode:", error);
-    }
-  }
+  saveSettings();
 }
 
 function cycleQualityMode() {
   const currentIndex = QUALITY_MODES.indexOf(qualityMode);
   const nextIndex = (currentIndex + 1) % QUALITY_MODES.length;
   setQualityMode(QUALITY_MODES[nextIndex]);
+}
+
+function cycleDifficultyMode() {
+  const currentIndex = DIFFICULTY_MODES.indexOf(aiDifficulty);
+  const nextIndex = (currentIndex + 1) % DIFFICULTY_MODES.length;
+  aiDifficulty = DIFFICULTY_MODES[nextIndex];
+  refreshDifficultyButton();
+  refreshModeChip();
+  saveSettings();
+}
+
+function toggleSound() {
+  soundEnabled = !soundEnabled;
+  refreshSoundButton();
+  saveSettings();
 }
 
 function assignRandomVsComputerRoles() {
@@ -337,6 +675,10 @@ function ensureAudio() {
 }
 
 function playTone(frequency, duration, type = "sine", volume = 0.03) {
+  if (!soundEnabled) {
+    return;
+  }
+
   ensureAudio();
 
   const osc = audioCtx.createOscillator();
@@ -384,6 +726,18 @@ function updateStatus() {
   }
 
   statusEl.classList.remove("status--pulse");
+
+  if (isReplaying) {
+    const totalMoves = replayedMoves.length;
+    const done = Math.min(replayIndex, totalMoves);
+    statusEl.textContent = `Replay ${done}/${totalMoves}`;
+    statusEl.classList.add("status--pulse");
+    statusPulseTimer = window.setTimeout(() => {
+      statusEl.classList.remove("status--pulse");
+    }, 120);
+    return;
+  }
+
   if (game.winner() !== Cell.Empty) {
     const winnerText = labels[game.winner()];
     const winnerLabel = vsComputer
@@ -418,6 +772,10 @@ function updateStatus() {
 }
 
 function recordScore() {
+  if (isReplaying) {
+    return;
+  }
+
   if (game.winner() !== Cell.Empty && !scene.userData.scoreRecorded) {
     const winner = game.winner();
     if (vsComputer) {
@@ -450,6 +808,12 @@ function recordScore() {
     saveScoreState();
     refreshScoreChip();
     scene.userData.drawRecorded = true;
+  }
+}
+
+function maybeSaveMatchState() {
+  if (game.winner() !== Cell.Empty || game.is_draw()) {
+    saveLastMatch();
   }
 }
 
@@ -606,6 +970,41 @@ function evaluateBoard(board, depth) {
   return null;
 }
 
+function chooseEasyMove() {
+  const moves = boardMoves(boardFromGame());
+  if (moves.length === 0) {
+    return -1;
+  }
+
+  return moves[Math.floor(Math.random() * moves.length)];
+}
+
+function chooseBalancedMove() {
+  const board = boardFromGame();
+  const moves = boardMoves(board);
+  if (moves.length === 0) {
+    return -1;
+  }
+
+  if (Math.random() < DIFFICULTY_KEY_MAP.smart) {
+    return chooseSmartMove();
+  }
+
+  return moves[Math.floor(Math.random() * moves.length)];
+}
+
+function chooseAIMove() {
+  if (aiDifficulty === "easy") {
+    return chooseEasyMove();
+  }
+
+  if (aiDifficulty === "master") {
+    return chooseSmartMove();
+  }
+
+  return chooseBalancedMove();
+}
+
 function minimax(board, depth, player) {
   const score = evaluateBoard(board, depth);
   if (score !== null) {
@@ -667,6 +1066,10 @@ function playComputerTurn() {
     return;
   }
 
+  if (isReplaying) {
+    return;
+  }
+
   if (game.winner() !== Cell.Empty || game.is_draw() || game.current_player() !== aiPlayerCell) {
     return;
   }
@@ -677,7 +1080,7 @@ function playComputerTurn() {
 
   aiThinking = true;
   const token = ++aiMoveToken;
-  const move = chooseSmartMove();
+  const move = chooseAIMove();
   statusEl.textContent = "Computer is thinking…";
   const thinkingDelay =
     qualityMode === "performance" ? 150 : qualityMode === "balanced" ? 220 : 320;
@@ -694,12 +1097,14 @@ function playComputerTurn() {
     }
 
     if (move >= 0 && game.play(move)) {
+      appendMoveHistory(move, aiPlayerCell, aiPlayerCell === humanPlayerCell ? "You" : "Computer");
       renderBoardState();
       updateGhost();
     }
 
     aiThinking = false;
     updateStatus();
+    maybeSaveMatchState();
   }, thinkingDelay);
 }
 
@@ -765,7 +1170,7 @@ function spawnConfetti(color, center) {
     color,
     size: 0.09,
     transparent: true,
-    opacity: preset === QUALITY_PRESETS.performance ? 0.8 : 0.95,
+    opacity: qualityMode === "performance" ? 0.8 : 0.95,
     depthWrite: false,
   });
 
@@ -790,6 +1195,7 @@ function addPiece(index, cell) {
   boardGroup.add(piece);
   piece.rotation.x = (Math.random() - 0.5) * 0.06;
   piece.rotation.z = (Math.random() - 0.5) * 0.08;
+  piece.userData.player = cell;
   pieces.push({ piece, bornAt: performance.now() });
 
   playMoveSfx(cell);
@@ -936,12 +1342,24 @@ function pickCell(event) {
 }
 
 function onPointerMove(event) {
+  if (isReplaying) {
+    hoveredCell = null;
+    updateGhost();
+    return;
+  }
+
   hoveredCell = pickCell(event);
   updateGhost();
 }
 
 function onClick(event) {
-  if (aiThinking || (vsComputer && game.current_player() !== humanPlayerCell)) {
+  if (
+    isReplaying ||
+    aiThinking ||
+    (vsComputer && game.current_player() !== humanPlayerCell) ||
+    game.winner() !== Cell.Empty ||
+    game.is_draw()
+  ) {
     return;
   }
 
@@ -951,9 +1369,12 @@ function onClick(event) {
   }
 
   const index = picked.userData.index;
+  const moving = game.current_player();
   if (game.play(index)) {
+    appendMoveHistory(index, moving, vsComputer ? (moving === humanPlayerCell ? "You" : "Computer") : CELL_LABELS[moving] || "X");
     renderBoardState();
     updateGhost();
+    maybeSaveMatchState();
     playComputerTurn();
   }
 }
@@ -1026,6 +1447,20 @@ function animate(now) {
   boardGroup.rotation.y = Math.sin(now * boardDrift) * 0.01;
   boardGroup.rotation.z = Math.cos(now * (boardDrift * 0.7)) * 0.004;
 
+  if (ambientGlow) {
+    const glowPulse = 0.52 + 0.08 * Math.sin(now * 0.0011);
+    ambientGlow.scale.setScalar(1 + glowPulse * 0.015);
+    if (ambientGlow.material) {
+      ambientGlow.material.opacity = Math.max(0.38, glowPulse);
+    }
+  }
+
+  if (starField && starField.material) {
+    starField.rotation.y += 0.00022;
+    starField.rotation.z += 0.0001;
+    starField.material.opacity = qualityMode === "performance" ? 0.32 : 0.42;
+  }
+
   camera.position.lerp(cameraTarget, 0.05);
   camera.lookAt(0, 0, 0);
 
@@ -1094,6 +1529,47 @@ function setup3D() {
 
   ambientLight = new THREE.AmbientLight(0x7f9dff, 0.5);
   scene.add(ambientLight);
+
+  ambientGlow = new THREE.Mesh(
+    new THREE.RingGeometry(2.8, 6.8, 72),
+    new THREE.MeshBasicMaterial({
+      color: 0x8eb3ff,
+      transparent: true,
+      opacity: 0.38,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+  );
+  ambientGlow.rotation.x = -Math.PI / 2;
+  ambientGlow.position.y = 0.03;
+  scene.add(ambientGlow);
+
+  const starCount = qualityMode === "performance" ? 180 : 300;
+  const starPositions = new Float32Array(starCount * 3);
+  for (let i = 0; i < starCount; i++) {
+    const i3 = i * 3;
+    const radius = 18 + Math.random() * 26;
+    const azimuth = Math.random() * Math.PI * 2;
+    const elevation = Math.acos(Math.random() * 2 - 1);
+    starPositions[i3] = radius * Math.sin(elevation) * Math.cos(azimuth);
+    starPositions[i3 + 1] = radius * Math.cos(elevation);
+    starPositions[i3 + 2] = radius * Math.sin(elevation) * Math.sin(azimuth);
+  }
+  const starGeometry = new THREE.BufferGeometry();
+  starGeometry.setAttribute("position", new THREE.BufferAttribute(starPositions, 3));
+  starField = new THREE.Points(
+    starGeometry,
+    new THREE.PointsMaterial({
+      color: 0xd6e5ff,
+      size: 0.05,
+      transparent: true,
+      opacity: 0.38,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    })
+  );
+  scene.add(starField);
 
   baseCellMaterial = new THREE.MeshPhysicalMaterial({
     color: 0x23304a,
@@ -1166,11 +1642,16 @@ function setup3D() {
 
 if (modeToggle) {
   modeToggle.addEventListener("click", () => {
+    if (isReplaying) {
+      stopReplay();
+    }
+
     vsComputer = !vsComputer;
     aiMoveToken += 1;
     aiThinking = false;
     game.reset();
     resetScenePieces();
+    resetMoveLog();
     cameraTarget.copy(cameraAnchors.neutral);
 
     if (vsComputer) {
@@ -1195,12 +1676,58 @@ if (qualityToggle) {
   qualityToggle.addEventListener("click", cycleQualityMode);
 }
 
+if (difficultyToggle) {
+  difficultyToggle.addEventListener("click", () => {
+    if (isReplaying) {
+      stopReplay();
+    }
+
+    cycleDifficultyMode();
+    refreshDifficultyButton();
+  });
+}
+
+if (soundToggle) {
+  soundToggle.addEventListener("click", toggleSound);
+}
+
+if (replayButton) {
+  replayButton.addEventListener("click", () => {
+    if (isReplaying) {
+      stopReplay();
+      statusEl.textContent = "Replay stopped.";
+      return;
+    }
+
+    startReplay();
+  });
+}
+
+if (resetScoreButton) {
+  resetScoreButton.addEventListener("click", () => {
+    if (isReplaying) {
+      stopReplay();
+    }
+
+    scoreState = baseScoreTemplate();
+    saveScoreState();
+    refreshScoreChip();
+  });
+}
+
 async function run() {
   await init();
   game = new Game();
   setup3D();
-  qualityMode = readSavedQuality();
+
+  const settings = readSavedSettings();
+  soundEnabled = settings.soundEnabled;
+  aiDifficulty = settings.aiDifficulty;
+  qualityMode = settings.quality;
   setQualityMode(qualityMode);
+
+  refreshDifficultyButton();
+  refreshSoundButton();
   if (vsComputer) {
     assignRandomVsComputerRoles();
   } else {
@@ -1213,6 +1740,10 @@ async function run() {
   refreshModeButton();
   refreshScoreChip();
   refreshQualityButton();
+  refreshSoundButton();
+  refreshReplayButton();
+  updateMoveLog();
+
   if (vsComputer && game.current_player() === aiPlayerCell) {
     playComputerTurn();
   }
@@ -1222,12 +1753,17 @@ async function run() {
   }, 260);
 
   resetButton.addEventListener("click", () => {
+    if (isReplaying) {
+      stopReplay();
+    }
+
     aiMoveToken += 1;
     aiThinking = false;
     game.reset();
     if (vsComputer) {
       assignRandomVsComputerRoles();
     }
+    resetMoveLog();
     resetScenePieces();
     cameraTarget.copy(cameraAnchors.neutral);
     renderBoardState();
